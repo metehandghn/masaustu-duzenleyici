@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Masaüstü Düzenleyici</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="logo" src="logo.svg" alt="" aria-hidden="true">
+      <div>
+        <h1>Masaüstü Düzenleyici</h1>
+        <p id="dirLabel" class="dir">Klasör yükleniyor…</p>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="btnFolder" class="ghost">Klasör seç</button>
+      <button id="btnScan" class="ghost">Yeniden tara</button>
+      <button id="btnUndo" class="ghost" disabled>↶ Geçmiş / Geri al</button>
+    </div>
+  </header>
+
+  <section class="toolbar">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-filter="all">Hepsi <b id="cAll">0</b></button>
+      <button class="tab" data-filter="existing">Var olan klasörler <b id="cExisting">0</b></button>
+      <button class="tab" data-filter="name">İsim benzerliği <b id="cName">0</b></button>
+      <button class="tab" data-filter="nametype">Tür + İsim <b id="cNameType">0</b></button>
+      <button class="tab" data-filter="type">Dosya türü <b id="cType">0</b></button>
+    </div>
+    <div class="bulk">
+      <button id="selAll" class="link">Görünenlerin hepsini seç</button>
+      <button id="selNone" class="link">Seçimi temizle</button>
+    </div>
+  </section>
+
+  <p id="stats" class="stats"></p>
+  <main id="groups" class="groups"></main>
+
+  <footer class="footer">
+    <span id="summary">Düzenlemek istediğin grupları tikle.</span>
+    <button id="btnApply" class="primary" disabled>Seçilenleri klasörle</button>
+  </footer>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-box">
+      <h2 id="modalTitle"></h2>
+      <div id="modalBody" class="modal-body"></div>
+      <div class="modal-actions">
+        <button id="modalCancel" class="ghost">Vazgeç</button>
+        <button id="modalOk" class="primary">Onayla</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="grouping.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

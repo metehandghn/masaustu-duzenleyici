@@ -1,0 +1,58 @@
+{
+  "name": "masaustu-duzenleyici",
+  "version": "1.0.0",
+  "description": "Masaüstündeki dosyaları türe ve benzer isme göre gruplayıp seçtiğin klasörlere yerleştiren uygulama",
+  "main": "main.js",
+  "author": "Metehan Dağhan",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "rcedit": "^4.0.1"
+  },
+  "build": {
+    "appId": "com.metehan.masaustuduzenleyici",
+    "productName": "Masaüstü Düzenleyici",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "main.js",
+      "preload.js",
+      "fileops.js",
+      "grouping.js",
+      "renderer.js",
+      "index.html",
+      "styles.css",
+      "icon.ico",
+      "logo.svg"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Masaüstü Düzenleyici",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "afterPack": "build/afterPack.js"
+  },
+  "keywords": [
+    "electron",
+    "desktop",
+    "organizer",
+    "windows",
+    "dosya-duzenleyici"
+  ]
+}
