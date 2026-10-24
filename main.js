@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const ops = require('./fileops');
+const { arrangeDesktop } = require('./desktop-arrange');
 
 let win;
 const historyPath = () => path.join(app.getPath('userData'), 'history.json');
@@ -39,6 +40,7 @@ ipcMain.handle('list-history', () => ops.listHistory(historyPath()));
 ipcMain.handle('undo-selected', (_e, picks) => ops.undoSelected(historyPath(), picks));
 ipcMain.handle('history-count', () => ops.historyCount(historyPath()));
 ipcMain.handle('open-folder', (_e, p) => shell.openPath(p));
+ipcMain.handle('arrange-desktop', (_e, { mode, auto }) => arrangeDesktop(mode, auto));
 
 app.whenReady().then(() => {
   createWindow();

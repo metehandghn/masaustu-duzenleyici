@@ -1,6 +1,6 @@
 {
   "name": "masaustu-duzenleyici",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Masaüstündeki dosyaları türe ve benzer isme göre gruplayıp seçtiğin klasörlere yerleştiren uygulama",
   "main": "main.js",
   "author": "Metehan Dağhan",
@@ -23,6 +23,7 @@
       "preload.js",
       "fileops.js",
       "grouping.js",
+      "desktop-arrange.js",
       "renderer.js",
       "index.html",
       "styles.css",

@@ -11,6 +11,7 @@ Masaüstündeki dağınıklığı toplamak için Windows uygulaması. Dosyaları
 - **Tür + isim:** Benzer isimli dosyalar türüne göre de ayrılır, örneğin **Site - Videolar** ve **Site - Resimler**.
 - **Var olan klasörler:** Klasörlerin içine bakar. Dışarıdaki yeni dosya bir klasördekilerle aynı isim ve türdeyse, ya da klasörün adı bir türse (**Videolar**, **Faturalar**), o klasöre eklemeyi önerir.
 - **Sen seçersin:** Her grubu ya da gruptaki tek tek dosyaları tikleyebilirsin. Klasör adını değiştirebilir, dosyaları sürükleyip başka gruba ya da yeni bir klasöre taşıyabilirsin.
+- **Masaüstünü sırala:** Klasörleme sonrası dağınık kalan simgeleri tek tuşla türe, ada, tarihe ya da boyuta göre düzenli dizer. Windows'un kendi "Sıralama ölçütü" özelliğini kullanır, dosyalara dokunmaz. İstersen "Otomatik düzenle" ile simgeler hep sıralı kalır.
 - **Güvenli taşıma:** Hiçbir dosyanın üzerine yazılmaz. Aynı isimde dosya varsa `dosya (2).pdf` olarak kaydedilir. Taşımadan önce özet gösterilir.
 - **Seçmeli geri alma:** Son 50 işlem saklanır. İstediğin işlemi ya da bir işlemin içindeki tek bir klasörü geri alabilirsin. Var olan klasörlere eklenen dosyalar geri alınınca klasör ve içindeki eski dosyalar yerinde kalır.
 - **OneDrive uyumlu:** Eşitleme sırasında kilitlenen klasörler için silme tekrar denenir.
@@ -70,6 +71,7 @@ Aynı dosya birden fazla grupta görünebilir. Birden çok grup seçilirse dosya
 | `main.js` | Electron ana süreci, pencere ve IPC kanalları |
 | `preload.js` | Arayüze açılan güvenli fonksiyonlar (`contextIsolation`) |
 | `fileops.js` | Tarama, taşıma, işlem geçmişi ve geri alma |
+| `desktop-arrange.js` | Masaüstü simgelerini Explorer'ın görünümü (IFolderView2) üzerinden sıralama |
 | `grouping.js` | Gruplama ve var olan klasörlerle eşleştirme |
 | `renderer.js`, `index.html`, `styles.css` | Arayüz, sürükle-bırak, geçmiş penceresi |
 | `build/` | Simge dosyaları ve paketleme sonrası simgeyi .exe'ye yazan betik |

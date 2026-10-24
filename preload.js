@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld('api', {
   undoSelected: (picks) => ipcRenderer.invoke('undo-selected', picks),
   historyCount: () => ipcRenderer.invoke('history-count'),
   openFolder: (p) => ipcRenderer.invoke('open-folder', p),
+  arrangeDesktop: (mode, auto) => ipcRenderer.invoke('arrange-desktop', { mode, auto }),
 });

@@ -156,3 +156,13 @@ body.is-dragging .new-drop { border-color: var(--accent); }
 .folder-input[readonly]:hover { border-color: transparent; }
 .meta { flex-wrap: wrap; row-gap: 2px; }
 .meta > span { white-space: nowrap; }
+
+/* Masaüstünü sırala */
+.opt-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 4px; color: var(--text); cursor: pointer; border-top: 1px solid var(--line); }
+.opt-row:first-of-type { border-top: 0; }
+.opt-row span { display: flex; flex-direction: column; gap: 1px; }
+.opt-row small { color: var(--muted); font-size: 12px; }
+.opt-row input[type=radio] { accent-color: var(--accent); width: 17px; height: 17px; margin: 2px 0 0; flex-shrink: 0; }
+.opt-row .check { margin-top: 2px; }
+#modalBody > div > .opt-row { margin-top: 6px; border-top: 1px solid var(--line); }
+.modal { z-index: 30; }

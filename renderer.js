@@ -15,7 +15,21 @@ const state = {
   filter: 'all',
   drag: null,            // sürüklenen dosya: { gid, name }
   focusId: null,         // render sonrası adına odaklanılacak grup
+  desktop: null,         // masaüstü klasörünün yolu
 };
+
+// Kullanıcı tercihleri (sıralama biçimi vb.) — sadece bu bilgisayarda saklanır
+const prefs = {
+  get(k, d) { try { const v = localStorage.getItem('pref:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('pref:' + k, JSON.stringify(v)); } catch { /* yoksay */ } },
+};
+const SORT_MODES = [
+  ['type', 'Türe göre', 'Klasörler önce, sonra aynı türdeki dosyalar yan yana'],
+  ['name', 'Ada göre', 'Alfabetik sıra'],
+  ['date', 'Tarihe göre', 'En son değişenler önce'],
+  ['size', 'Boyuta göre', 'En büyükler önce'],
+];
+const isDesktop = () => state.desktop && state.dir && state.dir.toLowerCase() === state.desktop.toLowerCase();
 
 function el(tag, props = {}, children = []) {
   const n = document.createElement(tag);
@@ -307,6 +321,7 @@ async function refreshUndo() {
 
 async function load(dir) {
   state.dir = dir;
+  $('#btnArrange').classList.toggle('hidden', !isDesktop());
   $('#dirLabel').textContent = dir;
   $('#dirLabel').title = dir;
   let folders = [];
@@ -349,7 +364,14 @@ async function applySelected() {
     ul,
     el('p', { text: 'İstersen sonra “Son işlemi geri al” ile her şeyi eski yerine döndürebilirsin.' }),
   ]);
+  let arrangeBox = null;
+  if (isDesktop()) {
+    arrangeBox = el('input', { type: 'checkbox', class: 'check', checked: prefs.get('arrangeAfter', true) });
+    body.append(el('label', { class: 'opt-row' }, [arrangeBox, el('span', { text: 'Ardından masaüstü simgelerini düzenli sırala' })]));
+  }
   if (!(await confirmBox('Klasörleme yapılsın mı?', body, 'Klasörle'))) return;
+  const arrangeAfter = arrangeBox ? arrangeBox.checked : false;
+  if (arrangeBox) prefs.set('arrangeAfter', arrangeAfter);
 
   $('#btnApply').disabled = true;
   const res = await window.api.apply(state.dir, chosen.map(g => ({
@@ -359,6 +381,7 @@ async function applySelected() {
   await load(state.dir);
   if (res.errors.length) showErrors(`${res.moved} dosya taşındı, ${res.errors.length} dosyada sorun çıktı`, res.errors);
   else toast(`✓ ${res.moved} dosya ${chosen.length} klasöre yerleştirildi`);
+  if (arrangeAfter && res.moved) await runArrange(prefs.get('sortMode', 'type'), prefs.get('autoArrange', -1), true);
 }
 
 function formatDate(ms) {
@@ -441,6 +464,42 @@ async function openHistory() {
   else toast(`↶ ${res.restored} dosya eski yerine döndü`);
 }
 
+// ---------- Masaüstünü sırala ----------
+async function runArrange(mode, auto, quiet) {
+  const label = (SORT_MODES.find(m => m[0] === mode) || SORT_MODES[0])[1].toLowerCase();
+  if (!quiet) toast('Masaüstü sıralanıyor…');
+  const btn = $('#btnArrange');
+  btn.disabled = true;
+  const res = await window.api.arrangeDesktop(mode, auto);
+  btn.disabled = false;
+  if (res.ok) toast(`▦ Masaüstü ${label} sıralandı`);
+  else confirmBox('Masaüstü sıralanamadı', el('div', {}, [
+    el('p', { text: 'Windows masaüstü simgelerine ulaşılamadı. Masaüstünde sağ tık → Sıralama ölçütü ile elle de sıralayabilirsin.' }),
+    el('p', { class: 'err', text: res.error || '' }),
+  ]), 'Tamam');
+  return res.ok;
+}
+
+async function openArrange() {
+  const current = prefs.get('sortMode', 'type');
+  const radios = SORT_MODES.map(([id, title, desc]) => {
+    const r = el('input', { type: 'radio', name: 'sortMode', value: id, checked: id === current });
+    return { id, r, row: el('label', { class: 'opt-row radio' }, [r, el('span', {}, [el('strong', { text: title }), el('small', { text: desc })])]) };
+  });
+  const auto = el('input', { type: 'checkbox', class: 'check', checked: prefs.get('autoArrange', -1) === 1 });
+  const body = el('div', { class: 'arrange' }, [
+    el('p', { text: 'Masaüstündeki simgeler, Windows\'un “Sıralama ölçütü” özelliğiyle düzenli dizilir. Dosyalara dokunulmaz, sadece yerleri değişir.' }),
+    ...radios.map(x => x.row),
+    el('label', { class: 'opt-row' }, [auto, el('span', {}, [el('strong', { text: 'Otomatik düzenle' }), el('small', { text: 'Simgeler hep sıralı kalsın, elle sürüklenemesin' })])]),
+  ]);
+  if (!(await confirmBox('Masaüstünü sırala', body, 'Sırala'))) return;
+  const mode = (radios.find(x => x.r.checked) || radios[0]).id;
+  const autoVal = auto.checked ? 1 : 0;
+  prefs.set('sortMode', mode);
+  prefs.set('autoArrange', autoVal);
+  await runArrange(mode, autoVal);
+}
+
 function showErrors(title, errors) {
   const ul = el('ul');
   errors.slice(0, 30).forEach(e => ul.append(el('li', {}, [el('strong', { text: e.file }), el('span', { class: 'err', text: e.message })])));
@@ -457,6 +516,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 $('#selAll').addEventListener('click', () => { visibleGroups().forEach(g => state.enabled.add(g.id)); render(); });
 $('#selNone').addEventListener('click', () => { state.enabled.clear(); render(); });
 $('#btnApply').addEventListener('click', applySelected);
+$('#btnArrange').addEventListener('click', openArrange);
 $('#btnUndo').addEventListener('click', openHistory);
 $('#btnScan').addEventListener('click', () => load(state.dir));
 $('#btnFolder').addEventListener('click', async () => {
@@ -469,4 +529,4 @@ $('#dirLabel').addEventListener('dblclick', () => window.api.openFolder(state.di
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
-window.api.getDesktop().then(load);
+window.api.getDesktop().then(d => { state.desktop = d; load(d); });
