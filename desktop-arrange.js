@@ -96,6 +96,13 @@ public static class DesktopArranger {
     step = "IFolderView2";
     IFolderView2X view = (IFolderView2X)viewObj;
 
+    if (mode == "query") {
+      step = "GetCurrentFolderFlags";
+      uint cur;
+      Check(view.GetCurrentFolderFlags(out cur), "GetCurrentFolderFlags");
+      return (cur & FWF_AUTOARRANGE) != 0 ? "auto=1" : "auto=0";
+    }
+
     Guid fmt = new Guid("B725F130-47EF-101A-A5F1-02608C9EEBAC");
     uint pid = 10;                                  // Ad
     if (mode == "type") pid = 4;                    // Öğe türü
@@ -121,12 +128,17 @@ public static class DesktopArranger {
 }
 `;
 
-const MODES = new Set(['name', 'type', 'date', 'added', 'size']);
+const MODES = new Set(['name', 'type', 'date', 'added', 'size', 'query']);
 
 /**
  * mode: 'name' | 'type' | 'date' | 'added' | 'size'
  * auto: -1 dokunma, 0 kapat, 1 aç (Otomatik düzenle)
  */
+// Masaüstünde "Simgeleri otomatik düzenle" açık mı? Hiçbir şeyi değiştirmez.
+function getAutoArrange() {
+  return arrangeDesktop('query', -1).then(r => (r.ok ? r.autoArrange : undefined));
+}
+
 function arrangeDesktop(mode = 'type', auto = -1) {
   return new Promise((resolve) => {
     if (process.platform !== 'win32') return resolve({ ok: false, error: 'Bu özellik sadece Windows\'ta çalışır.' });
@@ -140,8 +152,8 @@ function arrangeDesktop(mode = 'type', auto = -1) {
       "Add-Type -Language CSharp -TypeDefinition @'",
       CSHARP,
       "'@",
-      `  [DesktopArranger]::Arrange('${mode}', ${auto}) | Out-Null`,
-      '  Write-Output "OK"',
+      `  $r = [DesktopArranger]::Arrange('${mode}', ${auto})`,
+      '  Write-Output ("OK " + $r)',
       '} catch { $e = $_.Exception; while ($e.InnerException) { $e = $e.InnerException }; [Console]::Error.WriteLine("HATA: " + $e.Message); exit 1 }',
     ].join('\r\n');
     const encoded = Buffer.from(ps, 'utf16le').toString('base64');
@@ -156,7 +168,10 @@ function arrangeDesktop(mode = 'type', auto = -1) {
     child.on('error', e => { clearTimeout(timer); resolve({ ok: false, error: e.message }); });
     child.on('close', code => {
       clearTimeout(timer);
-      if (code === 0 && out.includes('OK')) resolve({ ok: true });
+      if (code === 0 && out.includes('OK')) {
+        const m = out.match(/auto=([01])/);
+        resolve({ ok: true, autoArrange: m ? m[1] === '1' : undefined });
+      }
       else {
         const text = (err || out || 'Bilinmeyen hata').trim();
         const line = text.split(/\r?\n/).find(l => l.startsWith('HATA:'));
@@ -208,4 +223,4 @@ function refreshShell(dirs) {
   }, 400);
 }
 
-module.exports = { arrangeDesktop, refreshShell, CSHARP };
+module.exports = { arrangeDesktop, getAutoArrange, refreshShell, CSHARP };

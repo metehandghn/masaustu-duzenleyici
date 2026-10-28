@@ -19,5 +19,6 @@ contextBridge.exposeInMainWorld('api', {
   setSettings: (patch) => ipcRenderer.invoke('set-settings', patch),
   onRescan: (cb) => ipcRenderer.on('rescan', () => cb()),
   onDesktopChanged: (cb) => ipcRenderer.on('desktop-changed', (_e, n) => cb(n)),
+  getAutoArrange: () => ipcRenderer.invoke('get-auto-arrange'),
   arrangeDesktop: (mode, auto) => ipcRenderer.invoke('arrange-desktop', { mode, auto }),
 });

@@ -1,7 +1,7 @@
 // Arayüz mantığı
 const $ = (s) => document.querySelector(s);
 const PREVIEW = 6; // kartta ilk kaç dosya görünsün
-const KIND_LABEL = { name: 'Benzer isim', type: 'Dosya türü', nametype: 'Tür + isim', custom: 'Senin grubun', existing: 'Var olan klasör', rule: 'Kural', dup: 'Kopya', old: 'Eski dosya' };
+const KIND_LABEL = { name: 'Benzer isim', type: 'Dosya türü', nametype: 'Tür + isim', custom: 'Senin grubun', existing: 'Var olan klasör', rule: 'Kural', dup: 'Kopya', old: 'Eski dosya', rest: 'Gruplanmamış' };
 let customCounter = 0;
 
 const state = {
@@ -67,7 +67,7 @@ function assignment() {
   const owner = new Map(); // dosya adı -> grup id
   for (const id of state.enabled) {
     const g = groupById(id);
-    if (!g) continue;
+    if (!g || g.kind === 'rest') continue;
     for (const f of g.files) if (isChecked(g, f.name) && !owner.has(f.name)) owner.set(f.name, g.id);
   }
   return owner;
@@ -174,7 +174,59 @@ function makeDropTarget(node, accept, onDrop) {
 }
 
 // ---------- Kart ----------
+// Kalan dosyalar: tiki ve klasörü yok, sadece sürükleme kaynağı
+function renderRestCard(g) {
+  const list = el('ul', { class: 'file-list' });
+  const showAll = state.expanded.has(g.id);
+  for (const f of (showAll ? g.files : g.files.slice(0, PREVIEW))) {
+    const { ext } = Grouping.splitName(f.name);
+    const li = el('li', {
+      draggable: true, title: f.name + '\nBir karta ya da Yeni klasör alanına sürükle',
+      ondragstart: (e) => {
+        state.drag = { gid: g.id, name: f.name };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', f.name);
+        requestAnimationFrame(() => li.classList.add('dragging'));
+        document.body.classList.add('is-dragging');
+      },
+      ondragend: () => {
+        li.classList.remove('dragging');
+        document.body.classList.remove('is-dragging');
+        document.querySelectorAll('.drop').forEach(n => n.classList.remove('drop'));
+        state.drag = null;
+      },
+    }, [
+      el('span', { class: 'grip', text: '⠿' }),
+      el('span', { class: 'ext', text: ext ? ext.slice(0, 4) : '—', style: `background:${Grouping.categoryOf(ext).color}` }),
+      el('span', { class: 'fname', text: f.name }),
+      el('span', { class: 'fsize', text: formatSize(f.size) }),
+    ]);
+    list.append(li);
+  }
+  const card = el('article', { class: 'card rest' }, [
+    el('div', { class: 'card-head' }, [
+      el('div', { class: 'bar', style: `background:${g.color}` }),
+      el('div', { class: 'title' }, [
+        el('div', { class: 'rest-title', text: 'Kalan dosyalar' }),
+        el('div', { class: 'meta' }, [
+          el('span', { class: 'badge rest', text: KIND_LABEL.rest }),
+          el('span', { text: `${g.files.length} dosya · bir karta sürükle` }),
+        ]),
+      ]),
+    ]),
+    list,
+  ]);
+  if (g.files.length > PREVIEW) {
+    card.append(el('button', {
+      class: 'more', text: showAll ? 'Daha az göster' : `+${g.files.length - PREVIEW} dosya daha`,
+      onclick: () => { showAll ? state.expanded.delete(g.id) : state.expanded.add(g.id); render(); },
+    }));
+  }
+  return card;
+}
+
 function renderCard(g, owner) {
+  if (g.kind === 'rest') return renderRestCard(g);
   const on = state.enabled.has(g.id);
   const going = on ? filesGoingTo(g, owner).length : g.files.filter(f => isChecked(g, f.name)).length;
 
@@ -274,7 +326,7 @@ function renderCard(g, owner) {
 
 // ---------- Ekran ----------
 function visibleGroups() {
-  return state.groups.filter(g => state.filter === 'all' || g.kind === state.filter || g.kind === 'custom');
+  return state.groups.filter(g => g.kind === 'rest' ? state.filter === 'all' : (state.filter === 'all' || g.kind === state.filter || g.kind === 'custom'));
 }
 
 function render() {
@@ -285,7 +337,7 @@ function render() {
   const owner = assignment();
 
   const count = (k) => state.groups.filter(g => g.kind === k).length;
-  $('#cAll').textContent = state.groups.length;
+  $('#cAll').textContent = state.groups.filter(g => g.kind !== 'rest').length;
   $('#cName').textContent = count('name');
   $('#cType').textContent = count('type');
   $('#cNameType').textContent = count('nametype');
@@ -372,11 +424,16 @@ async function load(dir, opts = {}) {
     await load(dir, { quiet: true });
     if (res.moved) toast(`⚙ Kurallara göre ${res.moved} dosya taşındı. Geçmiş'ten geri alabilirsin.`);
     if (res.errors.length) showErrors(`${res.errors.length} dosya taşınamadı`, res.errors);
-    if (res.moved && isDesktop() && prefs.get('arrangeAfter', true)) runArrange(prefs.get('sortMode', 'type'), prefs.get('autoArrange', -1), true);
+    if (res.moved && isDesktop() && prefs.get('arrangeAfter', true)) runArrange(prefs.get('sortMode', 'type'), -1, true);
     return;
   }
   const inAny = new Set(state.groups.flatMap(g => g.files.map(f => f.name)));
   state.ungrouped = state.files.filter(f => !inAny.has(f.name));
+  // Hiçbir gruba girmeyenler tek bir kartta: oradan sürüklenip istenen karta bırakılabilir
+  if (state.ungrouped.length) {
+    state.groups.push({ id: 'u0', kind: 'rest', key: 'rest', folderName: 'Kalan dosyalar',
+      files: [...state.ungrouped].sort((a, b) => a.name.localeCompare(b.name, 'tr')), color: '#adb5bd' });
+  }
   if (existing.length && !opts.quiet) {
     const n = existing.reduce((t, g) => t + g.files.length, 0);
     setTimeout(() => toast(`${n} dosya, var olan ${existing.length} klasöre eklenebilir`), 300);
@@ -423,7 +480,7 @@ async function applySelected() {
   await load(state.dir);
   if (res.errors.length) showErrors(`${res.moved} dosya taşındı, ${res.errors.length} dosyada sorun çıktı`, res.errors);
   else toast(`✓ ${res.moved} dosya ${chosen.length} klasöre yerleştirildi`);
-  if (arrangeAfter && res.moved) await runArrange(prefs.get('sortMode', 'type'), prefs.get('autoArrange', -1), true);
+  if (arrangeAfter && res.moved) await runArrange(prefs.get('sortMode', 'type'), -1, true);
 }
 
 function formatDate(ms) {
@@ -761,17 +818,21 @@ async function openArrange() {
     const r = el('input', { type: 'radio', name: 'sortMode', value: id, checked: id === current });
     return { id, r, row: el('label', { class: 'opt-row radio' }, [r, el('span', {}, [el('strong', { text: title }), el('small', { text: desc })])]) };
   });
-  const auto = el('input', { type: 'checkbox', class: 'check', checked: prefs.get('autoArrange', -1) === 1 });
+  // Kutunun ilk hali Windows'taki gerçek ayardan gelir; sen değiştirmezsen ayara dokunulmaz
+  let winAuto;
+  try { winAuto = await window.api.getAutoArrange(); } catch { winAuto = undefined; }
+  let touched = false;
+  const auto = el('input', { type: 'checkbox', class: 'check', checked: winAuto === true, onchange: () => { touched = true; } });
   const body = el('div', { class: 'arrange' }, [
     el('p', { text: 'Masaüstündeki simgeler, Windows\'un “Sıralama ölçütü” özelliğiyle düzenli dizilir. Dosyalara dokunulmaz, sadece yerleri değişir.' }),
     ...radios.map(x => x.row),
-    el('label', { class: 'opt-row' }, [auto, el('span', {}, [el('strong', { text: 'Otomatik düzenle' }), el('small', { text: 'Simgeler hep sıralı kalsın, elle sürüklenemesin' })])]),
+    el('label', { class: 'opt-row' }, [auto, el('span', {}, [el('strong', { text: 'Otomatik düzenle' }),
+      el('small', { text: 'Windows\'un “Simgeleri otomatik düzenle” ayarı. Açıkken simgeler hep sıralı kalır ve yeni dosyalar her zaman görünür yerde çıkar; elle sürüklenemez.' })])]),
   ]);
   if (!(await confirmBox('Masaüstünü sırala', body, 'Sırala'))) return;
   const mode = (radios.find(x => x.r.checked) || radios[0]).id;
-  const autoVal = auto.checked ? 1 : 0;
+  const autoVal = touched ? (auto.checked ? 1 : 0) : -1; // dokunulmadıysa ayarı değiştirme
   prefs.set('sortMode', mode);
-  prefs.set('autoArrange', autoVal);
   await runArrange(mode, autoVal);
 }
 
@@ -788,7 +849,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
   state.filter = t.dataset.filter;
   render();
 }));
-$('#selAll').addEventListener('click', () => { visibleGroups().forEach(g => state.enabled.add(g.id)); render(); });
+$('#selAll').addEventListener('click', () => { visibleGroups().filter(g => g.kind !== 'rest').forEach(g => state.enabled.add(g.id)); render(); });
 $('#selNone').addEventListener('click', () => { state.enabled.clear(); render(); });
 $('#btnApply').addEventListener('click', applySelected);
 $('#btnHelp').addEventListener('click', openSettings);

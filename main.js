@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const ops = require('./fileops');
 const Grouping = require('./grouping');
-const { arrangeDesktop, refreshShell } = require('./desktop-arrange');
+const { arrangeDesktop, getAutoArrange, refreshShell } = require('./desktop-arrange');
 
 const APP_ID = 'com.metehan.masaustuduzenleyici';
 const startHidden = process.argv.includes('--hidden');
@@ -144,13 +144,29 @@ let known = new Set();
 let debounce = null;
 let quietUntil = 0; // kendi taşımalarımız bildirim üretmesin
 const notified = new Set(); // aynı dosya için tekrar bildirim gösterme
+const announced = new Set(); // arayüze "yeni dosya" diye zaten bildirilenler
+const attempts = new Map(); // bekleyen dosya -> deneme sayısı
+const MAX_ATTEMPTS = 30;     // 10 sn arayla ~5 dakika; sonra vazgeç
 let retryTimer = null;
+let running = false;
+let rerun = false;
 
 async function snapshot() {
   try { known = new Set((await ops.scan(app.getPath('desktop'))).map(f => f.name)); } catch { known = new Set(); }
 }
 
+// Aynı anda tek kontrol çalışsın; çalışırken yeni olay gelirse bitince bir kez daha çalıştır
 async function onDesktopChange() {
+  if (running) { rerun = true; return; }
+  running = true;
+  try { await checkDesktop(); }
+  finally {
+    running = false;
+    if (rerun) { rerun = false; setTimeout(onDesktopChange, 500); }
+  }
+}
+
+async function checkDesktop() {
   const desktop = app.getPath('desktop');
   let files;
   try { files = await ops.scan(desktop); } catch { return; }
@@ -158,8 +174,10 @@ async function onDesktopChange() {
   known = new Set(files.map(f => f.name));
   if (Date.now() < quietUntil || !fresh.length) return;
 
-  // Arayüz açıksa haber ver (kullanıcı "Yeniden tara" diyebilsin)
-  if (win) win.webContents.send('desktop-changed', fresh.length);
+  // Arayüz açıksa haber ver (kullanıcı "Yeniden tara" diyebilsin) — her dosya için bir kez
+  const reallyNew = fresh.filter(f => !announced.has(f.name));
+  reallyNew.forEach(f => announced.add(f.name));
+  if (win && reallyNew.length) win.webContents.send('desktop-changed', reallyNew.length);
 
   // Kurallar otomatikse yeni dosyalara uygula — ama sadece "hazır" olanlara.
   // Yeni oluşturulmuş / hâlâ kopyalanan / Word'de açık dosyalar sonra tekrar denenir.
@@ -170,9 +188,16 @@ async function onDesktopChange() {
     const candidates = Grouping.matchRules(fresh, rules).flatMap(g => g.files);
     const ready = [];
     const waiting = [];
-    for (const f of candidates) ((await ops.isFileReady(desktop, f.name)) ? ready : waiting).push(f);
+    for (const f of candidates) {
+      if ((attempts.get(f.name) || 0) >= MAX_ATTEMPTS) continue; // uzun süredir kullanımda: bırak
+      ((await ops.isFileReady(desktop, f.name)) ? ready : waiting).push(f);
+    }
+    ready.forEach(f => attempts.delete(f.name));
     if (waiting.length) {
-      waiting.forEach(f => known.delete(f.name)); // bir dahaki kontrolde yine "yeni" sayılsın
+      waiting.forEach(f => {
+        attempts.set(f.name, (attempts.get(f.name) || 0) + 1);
+        known.delete(f.name); // bir dahaki kontrolde yine "yeni" sayılsın
+      });
       clearTimeout(retryTimer);
       retryTimer = setTimeout(onDesktopChange, 10000);
     }
@@ -256,6 +281,7 @@ ipcMain.handle('save-rules', async (_e, rules) => {
   return true;
 });
 ipcMain.handle('arrange-desktop', (_e, { mode, auto }) => arrangeDesktop(mode, auto));
+ipcMain.handle('get-auto-arrange', () => getAutoArrange());
 ipcMain.handle('get-settings', () => ({ ...settings, canAutostart: app.isPackaged }));
 ipcMain.handle('set-settings', (_e, patch) => {
   settings = { ...settings, ...patch };

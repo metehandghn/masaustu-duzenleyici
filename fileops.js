@@ -68,6 +68,18 @@ async function scanFolders(dir) {
 const crypto = require('crypto');
 const { createReadStream } = require('fs');
 
+// Aynı dosyayı (yol + boyut + değiştirme zamanı aynıysa) tekrar okumamak için önbellek
+const hashCache = new Map();
+
+async function cachedHash(p, f) {
+  const key = `${p}|${f.size}|${f.mtime}`;
+  if (hashCache.has(key)) return hashCache.get(key);
+  const h = await hashFile(p);
+  if (hashCache.size > 5000) hashCache.clear();
+  hashCache.set(key, h);
+  return h;
+}
+
 function hashFile(p) {
   return new Promise((resolve, reject) => {
     const h = crypto.createHash('sha1');
@@ -89,7 +101,7 @@ async function findDuplicates(dir) {
     const byHash = new Map();
     for (const f of list) {
       try {
-        const h = await hashFile(path.join(dir, f.name));
+        const h = await cachedHash(path.join(dir, f.name), f);
         if (!byHash.has(h)) byHash.set(h, []);
         byHash.get(h).push(f);
       } catch { /* okunamayan dosyayı atla */ }
@@ -147,6 +159,7 @@ async function isFileReady(dir, name, minAgeMs = 8000) {
     await wait(1500);
     const b = await fs.stat(p);
     if (a.size !== b.size || a.mtimeMs !== b.mtimeMs) return false; // hâlâ yazılıyor
+    if (!(b.mode & 0o200)) return true; // salt okunur dosya: açılamaz ama taşınabilir
     const fh = await fs.open(p, 'r+'); // başka program kilitlediyse hata verir
     await fh.close();
     return true;
