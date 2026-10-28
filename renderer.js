@@ -724,9 +724,11 @@ const TOUR = [
   { icon: '👋', title: 'Hoş geldin!',
     text: 'Masaüstü Düzenleyici, masaüstündeki dosyalara bakıp onları gruplar halinde önerir. Hangi grubun klasöre gideceğine sen karar verirsin, hiçbir şey sormadan taşınmaz.' },
   { icon: '☑️', title: 'Tikle ve klasörle',
-    text: 'Kartın başlığındaki tik bütün grubu seçer, dosyaların yanındaki tiklerle tek tek çıkarabilirsin. Klasör adına tıklayıp değiştirebilir, dosyaları sürükleyip başka bir karta taşıyabilirsin. Sonra sağ alttaki “Seçilenleri klasörle”ye bas.' },
+    text: 'Kartın başlığındaki tik bütün grubu seçer, dosyaların yanındaki tiklerle tek tek çıkarabilirsin. Klasör adına tıklayıp değiştirebilir, dosyaları sürükleyip başka bir karta taşıyabilirsin. Hiçbir gruba girmeyenler en sondaki “Kalan dosyalar” kartında durur. Sonra sağ alttaki “Seçilenleri klasörle”ye bas.' },
   { icon: '⭐', title: 'Kurallar ve öneriler',
     text: 'Bir kartın köşesindeki ⭐ ile o grubu kalıcı kural yaparsın; bir dahaki sefere kendiliğinden tikli gelir. “Kopyalar” ve “Eski dosyalar” sekmeleri, aynı içerikteki dosyaları ve uzun süredir dokunulmamış dosyaları önerir.' },
+  { icon: '🔔', title: 'Arka planda da çalışır',
+    text: 'Pencereyi kapatınca uygulama saatin yanındaki simgede çalışmaya devam eder. Kurallarda “otomatik uygula” açıksa masaüstüne gelen yeni dosyaları kendisi yerine koyar ve haber verir. Ayarlar ⋯ menüsünde: tema, bildirimler, Windows ile başlatma.' },
   { icon: '↶', title: 'Her şey geri alınabilir',
     text: '“Geçmiş / Geri al” ile istediğin işlemi, hatta tek bir klasörü eski haline döndürebilirsin. Klasörledikten sonra “Masaüstünü sırala” simgeleri düzenli dizer.' },
 ];
