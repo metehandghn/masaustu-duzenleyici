@@ -260,8 +260,89 @@
     return [...byFolder].map(([folder, list]) => ({
       id: 'e' + (n++), kind: 'existing', key: folder.name, folderName: folder.name,
       existingCount: (folder.files || []).length, files: sortFiles(list), color: colorFor(list),
+      profile: (function () { const p = folderProfile(folder); return { token: p.token, type: p.cat ? p.cat.name : null }; })(),
     })).sort((a, b) => b.files.length - a.files.length);
   }
 
-  return { buildGroups, matchExisting, categoryOf, splitName, tokens, CATEGORIES };
+  // ---- Kalıcı kurallar (klasör bazlı) ----
+  // config: { folders: [{ id, target, enabled, rules: [{ conds: [{ field, value }] }] }] }
+  // field: 'start' | 'contains' | 'end' | 'type' | 'ext'
+  // Bir klasörün kurallarından HERHANGİ BİRİNE uyan dosya o klasöre gider (veya);
+  // bir kuralın içindeki koşulların HEPSİ sağlanmalıdır (ve). Listede üstteki klasör önceliklidir.
+  const FIELDS = {
+    start: 'Adı şununla başlıyor',
+    contains: 'Adı şunu içeriyor',
+    end: 'Adı şununla bitiyor',
+    type: 'Türü',
+    ext: 'Uzantısı',
+  };
+
+  function condMatches(file, c) {
+    const v = fold(String(c.value || '').trim());
+    if (!v) return false;
+    const { base, ext } = splitName(file.name);
+    const b = fold(stem(file.name));
+    switch (c.field) {
+      case 'start': return b.startsWith(v);
+      case 'contains': return fold(base).includes(v);
+      case 'end': return b.endsWith(v);
+      case 'type': return fold(categoryOf(ext).name) === v;
+      case 'ext': return fold(ext) === v.replace(/^\./, '');
+      default: return false;
+    }
+  }
+
+  function ruleMatches(file, rule) {
+    const conds = (rule.conds || []).filter(c => String(c.value || '').trim());
+    return conds.length > 0 && conds.every(c => condMatches(file, c));
+  }
+
+  function targetLabel(target) {
+    const parts = String(target || '').split(/[\\/]+/).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : 'Klasör';
+  }
+
+  function matchRules(files, config) {
+    const folders = ((config && config.folders) || []).filter(f => f.enabled !== false && String(f.target || '').trim());
+    const byFolder = new Map();
+    for (const f of files) {
+      const hit = folders.find(fd => (fd.rules || []).some(r => ruleMatches(f, r)));
+      if (!hit) continue;
+      if (!byFolder.has(hit)) byFolder.set(hit, []);
+      byFolder.get(hit).push(f);
+    }
+    let n = 0;
+    return folders.filter(fd => byFolder.has(fd)).map(fd => {
+      const list = byFolder.get(fd);
+      return {
+        id: 'r' + (n++), kind: 'rule', key: fd.id, ruleFolderId: fd.id,
+        target: String(fd.target).trim(), folderName: targetLabel(fd.target),
+        files: sortFiles(list), color: colorFor(list),
+      };
+    });
+  }
+
+  // Bir gruptan kural önerisi çıkarır: { target, rules: [{ conds }] }
+  function suggestRule(group) {
+    const conds = [];
+    if (group.kind === 'existing' && group.profile) {
+      if (group.profile.token) conds.push({ field: 'start', value: group.profile.token });
+      if (group.profile.type) conds.push({ field: 'type', value: group.profile.type });
+    } else if (group.kind === 'name') {
+      conds.push({ field: 'start', value: String(group.key).split(' ')[0] });
+    } else if (group.kind === 'nametype') {
+      const [k, cat] = String(group.key).split('|');
+      conds.push({ field: 'start', value: k.split(' ')[0] });
+      if (cat) conds.push({ field: 'type', value: cat });
+    } else if (group.kind === 'type') {
+      conds.push({ field: 'type', value: group.key });
+    }
+    if (!conds.length) {
+      const t = tokens(group.files[0] ? group.files[0].name : '')[0];
+      if (t) conds.push({ field: 'start', value: t });
+    }
+    return { target: group.target || group.folderName, rules: [{ conds }] };
+  }
+
+  return { buildGroups, matchExisting, matchRules, suggestRule, condMatches, FIELDS, categoryOf, splitName, tokens, CATEGORIES };
 });

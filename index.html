@@ -17,15 +17,20 @@
     </div>
     <div class="actions">
       <button id="btnArrange" class="ghost hidden" title="Masaüstü simgelerini düzenli şekilde sırala">▦ Masaüstünü sırala</button>
+      <button id="btnRules" class="ghost" title="Kalıcı kurallar">⚙ Kurallar</button>
       <button id="btnFolder" class="ghost">Klasör seç</button>
       <button id="btnScan" class="ghost">Yeniden tara</button>
       <button id="btnUndo" class="ghost" disabled>↶ Geçmiş / Geri al</button>
+      <button id="btnHelp" class="ghost icon" title="Ayarlar ve yardım">⋯</button>
     </div>
   </header>
 
   <section class="toolbar">
     <div class="tabs" role="tablist">
       <button class="tab active" data-filter="all">Hepsi <b id="cAll">0</b></button>
+      <button class="tab hidden" id="tabRule" data-filter="rule">Kurallar <b id="cRule">0</b></button>
+      <button class="tab hidden" id="tabDup" data-filter="dup">Kopyalar <b id="cDup">0</b></button>
+      <button class="tab hidden" id="tabOld" data-filter="old">Eski dosyalar <b id="cOld">0</b></button>
       <button class="tab" data-filter="existing">Var olan klasörler <b id="cExisting">0</b></button>
       <button class="tab" data-filter="name">İsim benzerliği <b id="cName">0</b></button>
       <button class="tab" data-filter="nametype">Tür + İsim <b id="cNameType">0</b></button>

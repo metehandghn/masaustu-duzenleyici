@@ -4,14 +4,26 @@ Masaüstündeki dağınıklığı toplamak için Windows uygulaması. Dosyaları
 
 ![Masaüstü Düzenleyici ekran görüntüsü](docs/ekran-goruntusu.png)
 
+<details><summary>Karanlık tema</summary>
+
+![Karanlık tema](docs/ekran-goruntusu-karanlik.png)
+
+</details>
+
 ## Özellikler
 
 - **Benzer isim:** `rapor_v1`, `rapor_v2`, `Rapor son (1)` → **Rapor**. Sayılar, `v2`, `(1)`, `son`, `final`, `kopya` gibi ekler ve `index.html.txt` gibi çift uzantılar yok sayılır. Türkçe karakterler ve `I/ı` farkı doğru işlenir.
 - **Dosya türü:** Resimler, videolar, PDF'ler, Word, Excel, sunumlar, arşivler, kısayollar ve diğerleri.
 - **Tür + isim:** Benzer isimli dosyalar türüne göre de ayrılır, örneğin **Site - Videolar** ve **Site - Resimler**.
+- **Kalıcı kurallar:** Klasör bazlı kurallar tanımlayabilirsin, örneğin **Faturalar** klasörüne "adı *fatura* ile başlayan **veya** *dekont* içeren" dosyalar. Koşullar: adı şununla başlıyor / şunu içeriyor / şununla bitiyor, türü ve uzantısı. Bir kuralda koşullar "ve" ile birleştirilebilir. Hedef, masaüstündeki bir klasör adı ya da başka bir yerdeki tam yol olabilir. Herhangi bir grup kartındaki ⭐ ile o gruptan kural önerisi alınır. Kurala uyan dosyalar **Kurallar** sekmesinde tikli gelir; istersen "Açılışta kuralları otomatik uygula" ile uygulama açılınca sormadan taşınır.
 - **Var olan klasörler:** Klasörlerin içine bakar. Dışarıdaki yeni dosya bir klasördekilerle aynı isim ve türdeyse, ya da klasörün adı bir türse (**Videolar**, **Faturalar**), o klasöre eklemeyi önerir.
 - **Sen seçersin:** Her grubu ya da gruptaki tek tek dosyaları tikleyebilirsin. Klasör adını değiştirebilir, dosyaları sürükleyip başka gruba ya da yeni bir klasöre taşıyabilirsin.
-- **Masaüstünü sırala:** Klasörleme sonrası dağınık kalan simgeleri tek tuşla türe, ada, tarihe ya da boyuta göre düzenli dizer. Windows'un kendi "Sıralama ölçütü" özelliğini kullanır, dosyalara dokunmaz. İstersen "Otomatik düzenle" ile simgeler hep sıralı kalır.
+- **Masaüstünü sırala:** Klasörleme sonrası dağınık kalan simgeleri tek tuşla türe, ada, eklenme tarihine, değiştirme tarihine ya da boyuta göre düzenli dizer. Windows'un kendi "Sıralama ölçütü" özelliğini kullanır, dosyalara dokunmaz. İstersen "Otomatik düzenle" ile simgeler hep sıralı kalır.
+- **Kopyalar:** İçeriği birebir aynı olan dosyaları bulur (önce boyut, sonra SHA-1 karşılaştırması) ve fazlalarını **Kopyalar** klasörüne taşımayı önerir. Her kopyanın yanında hangi dosyayla aynı olduğu yazar; en eski dosya asıl kabul edilir ve yerinde kalır.
+- **Eski dosyalar:** 1, 3, 6 ya da 12 aydır değiştirilmemiş dosyaları **Arşiv** klasörüne önerir. Kısayollar hariç tutulur.
+- **Arka planda çalışma:** Pencere kapatılınca uygulama sistem tepsisinde çalışmaya devam eder ve masaüstünü izler. Kurallar otomatikse yeni gelen dosyalara da uygular ve taşıdığında bildirim gösterir. İstenirse her yeni dosya için de bildirim açılabilir. İstenirse Windows açılınca arka planda başlar.
+- **Tema:** ⋯ → Ayarlar'dan **Sistem** (Windows'u takip eder), **Açık** ya da **Koyu** seçilebilir.
+- **İlk açılış rehberi:** İlk açılışta 4 adımlık kısa bir tanıtım gösterir; ⋯ menüsünden tekrar açılabilir.
 - **Güvenli taşıma:** Hiçbir dosyanın üzerine yazılmaz. Aynı isimde dosya varsa `dosya (2).pdf` olarak kaydedilir. Taşımadan önce özet gösterilir.
 - **Seçmeli geri alma:** Son 50 işlem saklanır. İstediğin işlemi ya da bir işlemin içindeki tek bir klasörü geri alabilirsin. Var olan klasörlere eklenen dosyalar geri alınınca klasör ve içindeki eski dosyalar yerinde kalır.
 - **OneDrive uyumlu:** Eşitleme sırasında kilitlenen klasörler için silme tekrar denenir.

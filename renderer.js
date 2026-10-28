@@ -1,7 +1,7 @@
 // Arayüz mantığı
 const $ = (s) => document.querySelector(s);
 const PREVIEW = 6; // kartta ilk kaç dosya görünsün
-const KIND_LABEL = { name: 'Benzer isim', type: 'Dosya türü', nametype: 'Tür + isim', custom: 'Senin grubun', existing: 'Var olan klasör' };
+const KIND_LABEL = { name: 'Benzer isim', type: 'Dosya türü', nametype: 'Tür + isim', custom: 'Senin grubun', existing: 'Var olan klasör', rule: 'Kural', dup: 'Kopya', old: 'Eski dosya' };
 let customCounter = 0;
 
 const state = {
@@ -16,6 +16,9 @@ const state = {
   drag: null,            // sürüklenen dosya: { gid, name }
   focusId: null,         // render sonrası adına odaklanılacak grup
   desktop: null,         // masaüstü klasörünün yolu
+  rules: { autoApply: false, folders: [] },
+  dups: [],              // [{ keep, copies }]
+  firstLoad: true,       // otomatik kural uygulaması sadece açılışta
 };
 
 // Kullanıcı tercihleri (sıralama biçimi vb.) — sadece bu bilgisayarda saklanır
@@ -26,7 +29,8 @@ const prefs = {
 const SORT_MODES = [
   ['type', 'Türe göre', 'Klasörler önce, sonra aynı türdeki dosyalar yan yana'],
   ['name', 'Ada göre', 'Alfabetik sıra'],
-  ['date', 'Tarihe göre', 'En son değişenler önce'],
+  ['added', 'Eklenme tarihine göre', 'Masaüstüne en son gelenler önce (indirilen/kopyalanan dosyalarda tam doğru)'],
+  ['date', 'Değiştirme tarihine göre', 'En son düzenlenenler önce'],
   ['size', 'Boyuta göre', 'En büyükler önce'],
 ];
 const isDesktop = () => state.desktop && state.dir && state.dir.toLowerCase() === state.desktop.toLowerCase();
@@ -186,8 +190,9 @@ function renderCard(g, owner) {
     el('div', { class: 'title' }, [
       el('input', {
         class: 'folder-input', value: g.folderName, spellcheck: false,
-        readOnly: g.kind === 'existing',
-        title: g.kind === 'existing' ? 'Bu klasör zaten var, dosyalar içine eklenecek' : 'Klasör adını değiştirmek için tıkla',
+        readOnly: g.kind === 'existing' || g.kind === 'rule',
+        title: g.kind === 'rule' ? `Kurala göre hedef: ${g.target}`
+          : g.kind === 'existing' ? 'Bu klasör zaten var, dosyalar içine eklenecek' : 'Klasör adını değiştirmek için tıkla',
         oninput: (e) => { g.folderName = e.target.value; },
         onchange: () => render(), // diğer kartlardaki "→ klasör" yazıları güncellensin
       }),
@@ -195,8 +200,17 @@ function renderCard(g, owner) {
         el('span', { class: 'badge ' + g.kind, text: KIND_LABEL[g.kind] }),
         el('span', { text: g.kind === 'existing' ? `+${going} yeni` : `${going}/${g.files.length} dosya` }),
         g.kind === 'existing' ? el('span', { class: 'in-folder', title: `Klasörde şu an ${g.existingCount} dosya var`, text: `📁 ${g.existingCount} dosya` }) : null,
+        g.kind === 'old' ? el('select', { class: 'age-select', title: 'Bu süredir değişmemiş dosyalar',
+          onchange: (e) => setArchiveDays(Number(e.target.value)) },
+          AGE_OPTIONS.map(([d, t]) => el('option', { value: d, text: t + ' eski', selected: d === g.days }))) : null,
       ]),
     ]),
+    ['custom', 'dup', 'old'].includes(g.kind) ? null : el('button', {
+      class: 'rule-btn',
+      title: g.kind === 'rule' ? 'Bu kuralı düzenle' : 'Bu grup için kalıcı kural yap',
+      text: g.kind === 'rule' ? '✎' : '⭐',
+      onclick: (e) => { e.stopPropagation(); g.kind === 'rule' ? openRules(null, g.ruleFolderId) : openRules(Grouping.suggestRule(g)); },
+    }),
   ]);
 
   const list = el('ul', { class: 'file-list' });
@@ -237,7 +251,11 @@ function renderCard(g, owner) {
       el('span', { class: 'fname', text: f.name }),
       takenBy && checked
         ? el('span', { class: 'taken-note', text: '→ ' + takenBy.folderName })
-        : el('span', { class: 'fsize', text: formatSize(f.size) }),
+        : g.notes && g.notes[f.name]
+          ? el('span', { class: 'dup-note', title: 'Bununla birebir aynı: ' + g.notes[f.name], text: '= ' + g.notes[f.name] })
+          : g.kind === 'old'
+            ? el('span', { class: 'fsize', title: 'Son değişiklik', text: formatAge(f.mtime) })
+            : el('span', { class: 'fsize', text: formatSize(f.size) }),
     );
     list.append(li);
   }
@@ -272,6 +290,13 @@ function render() {
   $('#cType').textContent = count('type');
   $('#cNameType').textContent = count('nametype');
   $('#cExisting').textContent = count('existing');
+  $('#cRule').textContent = count('rule');
+  for (const [k, tab, c] of [['dup', '#tabDup', '#cDup'], ['old', '#tabOld', '#cOld']]) {
+    const g = state.groups.find(x => x.kind === k);
+    $(c).textContent = g ? g.files.length : 0;
+    $(tab).classList.toggle('hidden', !g);
+  }
+  $('#tabRule').classList.toggle('hidden', !count('rule'));
 
   if (!state.files.length) {
     box.append(el('div', { class: 'empty' }, [el('h3', { text: 'Burası zaten tertemiz ✨' }), el('p', { text: 'Bu klasörde düzenlenecek dosya bulunamadı.' })]));
@@ -319,7 +344,7 @@ async function refreshUndo() {
   $('#btnUndo').disabled = (await window.api.historyCount()) === 0;
 }
 
-async function load(dir) {
+async function load(dir, opts = {}) {
   state.dir = dir;
   $('#btnArrange').classList.toggle('hidden', !isDesktop());
   $('#dirLabel').textContent = dir;
@@ -332,18 +357,34 @@ async function load(dir) {
     state.files = [];
     toast('Klasör okunamadı: ' + e.message);
   }
+  try { state.rules = await window.api.getRules(); } catch { /* kural yoksa boş */ }
   const { groups } = Grouping.buildGroups(state.files);
   const existing = Grouping.matchExisting(state.files, folders);
-  state.groups = [...existing, ...groups];
+  const ruleGroups = Grouping.matchRules(state.files, state.rules);
+  try { state.dups = await window.api.findDuplicates(dir); } catch { state.dups = []; }
+  state.groups = [...ruleGroups, ...existing, ...suggestionGroups(), ...groups];
+
+  // Açılışta otomatik uygula
+  const first = state.firstLoad;
+  state.firstLoad = false;
+  if (first && state.rules.autoApply && ruleGroups.length) {
+    const res = await window.api.apply(dir, ruleGroups.map(g => ({ folderName: g.folderName, target: g.target, files: g.files.map(f => f.name) })));
+    await load(dir, { quiet: true });
+    if (res.moved) toast(`⚙ Kurallara göre ${res.moved} dosya taşındı. Geçmiş'ten geri alabilirsin.`);
+    if (res.errors.length) showErrors(`${res.errors.length} dosya taşınamadı`, res.errors);
+    if (res.moved && isDesktop() && prefs.get('arrangeAfter', true)) runArrange(prefs.get('sortMode', 'type'), prefs.get('autoArrange', -1), true);
+    return;
+  }
   const inAny = new Set(state.groups.flatMap(g => g.files.map(f => f.name)));
   state.ungrouped = state.files.filter(f => !inAny.has(f.name));
-  if (existing.length) {
+  if (existing.length && !opts.quiet) {
     const n = existing.reduce((t, g) => t + g.files.length, 0);
     setTimeout(() => toast(`${n} dosya, var olan ${existing.length} klasöre eklenebilir`), 300);
   }
   state.enabled.clear();
   state.unchecked.clear();
   state.expanded.clear();
+  ruleGroups.forEach(g => state.enabled.add(g.id)); // kural grupları tikli gelir
   render();
   refreshUndo();
 }
@@ -376,6 +417,7 @@ async function applySelected() {
   $('#btnApply').disabled = true;
   const res = await window.api.apply(state.dir, chosen.map(g => ({
     folderName: g.folderName.trim(),
+    target: g.target,
     files: filesGoingTo(g, owner).map(f => f.name),
   })));
   await load(state.dir);
@@ -397,7 +439,7 @@ async function openHistory() {
   const list = await window.api.listHistory();
   if (!list.length) { toast('Geri alınacak işlem yok.'); refreshUndo(); return; }
 
-  const picks = new Map(); // klasör yolu -> { id, checkbox }
+  const picks = []; // { id, folder, cb } — aynı klasör farklı işlemlerde tekrar edebilir
   const body = el('div', { class: 'history' }, [
     el('p', { text: 'Geri almak istediğin işlemleri ya da tek tek klasörleri seç. Seçtiğin klasörlerdeki dosyalar eski yerine döner, klasör silinir.' }),
   ]);
@@ -412,7 +454,7 @@ async function openHistory() {
         onchange: () => { headCheck.checked = children.every(c => c.checked); headCheck.indeterminate = !headCheck.checked && children.some(c => c.checked); updateOk(); },
       });
       children.push(cb);
-      picks.set(f.path, { id: h.id, cb });
+      picks.push({ id: h.id, folder: f.path, cb });
       return el('label', { class: 'h-folder', title: f.files.join('\n') }, [
         cb,
         el('span', { class: 'h-name', text: '📁 ' + f.name }),
@@ -440,7 +482,7 @@ async function openHistory() {
 
   const ok = $('#modalOk');
   function updateOk() {
-    const n = [...picks.values()].filter(p => p.cb.checked).length;
+    const n = picks.filter(p => p.cb.checked).length;
     ok.disabled = n === 0;
     ok.textContent = n ? `${n} klasörü geri al` : 'Geri al';
   }
@@ -453,7 +495,7 @@ async function openHistory() {
   if (!confirmed) return;
 
   const byId = {};
-  for (const [folder, p] of picks) if (p.cb.checked) (byId[p.id] = byId[p.id] || []).push(folder);
+  for (const p of picks) if (p.cb.checked) (byId[p.id] = byId[p.id] || []).push(p.folder);
   if (!Object.keys(byId).length) return;
 
   toast('Geri alınıyor…');
@@ -462,6 +504,239 @@ async function openHistory() {
   if (res.errors.length) showErrors(`${res.restored} dosya geri taşındı, ${res.errors.length} dosyada sorun çıktı`, res.errors);
   else if (res.leftDirs && res.leftDirs.length) toast(`↶ ${res.restored} dosya döndü. İçinde başka dosya olduğu için silinmeyen klasör: ${res.leftDirs.join(', ')}`);
   else toast(`↶ ${res.restored} dosya eski yerine döndü`);
+}
+
+// ---------- Öneriler: kopyalar ve eski dosyalar ----------
+const AGE_OPTIONS = [[30, '1 aydan'], [90, '3 aydan'], [180, '6 aydan'], [365, '1 yıldan']];
+const NO_ARCHIVE = new Set(['lnk', 'url', 'website']); // kısayollar masaüstünde kalsın
+
+function formatAge(ms) {
+  if (!ms) return '';
+  const days = Math.floor((Date.now() - ms) / 864e5);
+  if (days < 30) return days + ' gün önce';
+  if (days < 365) return Math.floor(days / 30) + ' ay önce';
+  return Math.floor(days / 365) + ' yıl önce';
+}
+
+function oldGroup() {
+  const days = prefs.get('archiveDays', 90);
+  const cutoff = Date.now() - days * 864e5;
+  const files = state.files
+    .filter(f => f.mtime && f.mtime < cutoff && !NO_ARCHIVE.has(Grouping.splitName(f.name).ext))
+    .sort((a, b) => a.mtime - b.mtime);
+  return files.length ? { id: 'o0', kind: 'old', key: 'old', folderName: 'Arşiv', files, days, color: '#868e96' } : null;
+}
+
+function suggestionGroups() {
+  const out = [];
+  const byName = new Map(state.files.map(f => [f.name, f]));
+  const notes = {};
+  const copies = [];
+  for (const set of state.dups || []) {
+    for (const c of set.copies) {
+      if (!byName.has(c)) continue;
+      notes[c] = set.keep;
+      copies.push(byName.get(c));
+    }
+  }
+  if (copies.length) out.push({ id: 'd0', kind: 'dup', key: 'dup', folderName: 'Kopyalar', files: copies, notes, color: '#e03131' });
+  const old = oldGroup();
+  if (old) out.push(old);
+  return out;
+}
+
+function setArchiveDays(days) {
+  prefs.set('archiveDays', days);
+  const i = state.groups.findIndex(g => g.kind === 'old');
+  const g = oldGroup();
+  if (i >= 0) { g ? (state.groups[i] = g) : state.groups.splice(i, 1); }
+  else if (g) state.groups.push(g);
+  if (!g) state.enabled.delete('o0');
+  if (state.unchecked.has('o0')) state.unchecked.delete('o0');
+  render();
+}
+
+// ---------- Kurallar ----------
+const TYPE_NAMES = Grouping.CATEGORIES.map(c => c.name).concat('Diğer Dosyalar');
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+// prefill: { target, rules } (karttan öneri) · focusId: düzenlenecek klasörün id'si
+async function openRules(prefill, focusId) {
+  const cfg = clone(state.rules || { autoApply: false, folders: [] });
+  cfg.folders = cfg.folders || [];
+  let focus = focusId || null;
+  if (prefill) {
+    const same = cfg.folders.find(f => String(f.target).toLowerCase() === String(prefill.target).toLowerCase());
+    if (same) { same.rules.push(...prefill.rules); focus = same.id; }
+    else { const f = { id: newId(), target: prefill.target, enabled: true, rules: prefill.rules }; cfg.folders.unshift(f); focus = f.id; }
+  }
+
+  const box = el('div', { class: 'rules-editor' });
+
+  function condRow(rule, c, ri, ci) {
+    const field = el('select', { class: 'r-field', onchange: (e) => { c.field = e.target.value; if (c.field === 'type') c.value = TYPE_NAMES[0]; draw(); } },
+      Object.entries(Grouping.FIELDS).map(([k, label]) => el('option', { value: k, text: label, selected: c.field === k })));
+    const value = c.field === 'type'
+      ? el('select', { class: 'r-value', onchange: (e) => { c.value = e.target.value; } },
+          TYPE_NAMES.map(n => el('option', { value: n, text: n, selected: c.value === n })))
+      : el('input', { class: 'r-value', value: c.value || '', spellcheck: false,
+          placeholder: c.field === 'ext' ? 'ör. zip' : 'ör. fatura', oninput: (e) => { c.value = e.target.value; } });
+    return el('div', { class: 'r-cond' }, [
+      el('span', { class: 'r-join', text: ci === 0 ? (ri === 0 ? 'Eğer' : 'veya') : 've' }),
+      field, value,
+      el('button', { class: 'r-x', title: 'Koşulu sil', text: '×', onclick: () => {
+        rule.conds.splice(ci, 1);
+        if (!rule.conds.length) rule._remove = true;
+        draw();
+      } }),
+    ]);
+  }
+
+  function folderCard(f, i) {
+    f.rules = (f.rules || []).filter(r => !r._remove);
+    const target = el('input', { class: 'r-target', value: f.target || '', spellcheck: false,
+      placeholder: 'Klasör adı (ör. Faturalar) ya da tam yol', oninput: (e) => { f.target = e.target.value; } });
+    const card = el('div', { class: 'r-folder' + (f.enabled === false ? ' off' : '') + (f.id === focus ? ' focus' : '') }, [
+      el('div', { class: 'r-head' }, [
+        el('input', { type: 'checkbox', class: 'check', checked: f.enabled !== false, title: 'Kuralı aç/kapat',
+          onchange: (e) => { f.enabled = e.target.checked; card.classList.toggle('off', !f.enabled); } }),
+        el('span', { class: 'r-icon', text: '📁' }),
+        target,
+        el('button', { class: 'ghost sm', text: 'Gözat', onclick: async () => { const d = await window.api.chooseFolder(); if (d) { f.target = d; target.value = d; } } }),
+        el('button', { class: 'r-icon-btn', title: 'Yukarı (öncelik)', text: '↑', disabled: i === 0, onclick: () => { [cfg.folders[i - 1], cfg.folders[i]] = [cfg.folders[i], cfg.folders[i - 1]]; draw(); } }),
+        el('button', { class: 'r-icon-btn', title: 'Aşağı', text: '↓', disabled: i === cfg.folders.length - 1, onclick: () => { [cfg.folders[i + 1], cfg.folders[i]] = [cfg.folders[i], cfg.folders[i + 1]]; draw(); } }),
+        el('button', { class: 'r-icon-btn danger', title: 'Bu klasörün kurallarını sil', text: '🗑', onclick: () => { cfg.folders.splice(i, 1); draw(); } }),
+      ]),
+      el('div', { class: 'r-hint', text: 'Bu klasöre gelsin:' }),
+    ]);
+    f.rules.forEach((rule, ri) => {
+      const r = el('div', { class: 'r-rule' }, rule.conds.map((c, ci) => condRow(rule, c, ri, ci)));
+      r.append(el('button', { class: 'link sm', text: '+ ve koşulu', onclick: () => { rule.conds.push({ field: 'type', value: TYPE_NAMES[0] }); draw(); } }));
+      card.append(r);
+    });
+    card.append(el('button', { class: 'link sm', text: f.rules.length ? '+ veya başka kural' : '+ Kural ekle',
+      onclick: () => { f.rules.push({ conds: [{ field: 'start', value: '' }] }); draw(); } }));
+    return card;
+  }
+
+  function draw() {
+    box.innerHTML = '';
+    const auto = el('input', { type: 'checkbox', class: 'check', checked: !!cfg.autoApply, onchange: (e) => { cfg.autoApply = e.target.checked; } });
+    box.append(
+      el('label', { class: 'opt-row auto' }, [auto, el('span', {}, [
+        el('strong', { text: 'Kuralları otomatik uygula' }),
+        el('small', { text: 'Uygulama açılınca ve arka planda masaüstüne yeni dosya gelince, kurala uyan dosyalar sormadan taşınır. Kapalıysa sadece tikli gelir, sen onaylarsın. Her durumda Geçmiş\'ten geri alınabilir.' }),
+      ])]),
+    );
+    if (!cfg.folders.length) box.append(el('p', { class: 'r-empty', text: 'Henüz kural yok. Bir grup kartındaki ⭐ ile ya da aşağıdan ekleyebilirsin.' }));
+    cfg.folders.forEach((f, i) => box.append(folderCard(f, i)));
+    box.append(el('button', { class: 'ghost r-add', text: '+ Yeni klasör için kural tanımla', onclick: () => {
+      const f = { id: newId(), target: '', enabled: true, rules: [{ conds: [{ field: 'start', value: '' }] }] };
+      cfg.folders.push(f); focus = f.id; draw();
+      const inputs = box.querySelectorAll('.r-target'); inputs[inputs.length - 1].focus();
+    } }));
+    const fc = box.querySelector('.r-folder.focus');
+    if (fc) requestAnimationFrame(() => fc.scrollIntoView({ block: 'nearest' }));
+  }
+
+  draw();
+  const promise = confirmBox('Kurallar', box, 'Kaydet');
+  $('#modal').classList.add('wide', 'xwide');
+  const ok = await promise;
+  $('#modal').classList.remove('wide', 'xwide');
+  if (!ok) return;
+
+  // Temizle: boş koşulları, koşulsuz kuralları ve hedefsiz klasörleri at
+  cfg.folders = cfg.folders.map(f => ({
+    id: f.id || newId(), target: String(f.target || '').trim(), enabled: f.enabled !== false,
+    rules: (f.rules || []).filter(r => !r._remove)
+      .map(r => ({ conds: r.conds.filter(c => String(c.value || '').trim()).map(c => ({ field: c.field, value: String(c.value).trim() })) }))
+      .filter(r => r.conds.length),
+  })).filter(f => f.target && f.rules.length);
+  cfg.autoApply = !!cfg.autoApply;
+
+  await window.api.saveRules(cfg);
+  state.rules = cfg;
+  toast(`⚙ ${cfg.folders.length} klasör için kurallar kaydedildi`);
+  await load(state.dir);
+}
+
+// ---------- İlk açılış rehberi ----------
+const TOUR = [
+  { icon: '👋', title: 'Hoş geldin!',
+    text: 'Masaüstü Düzenleyici, masaüstündeki dosyalara bakıp onları gruplar halinde önerir. Hangi grubun klasöre gideceğine sen karar verirsin, hiçbir şey sormadan taşınmaz.' },
+  { icon: '☑️', title: 'Tikle ve klasörle',
+    text: 'Kartın başlığındaki tik bütün grubu seçer, dosyaların yanındaki tiklerle tek tek çıkarabilirsin. Klasör adına tıklayıp değiştirebilir, dosyaları sürükleyip başka bir karta taşıyabilirsin. Sonra sağ alttaki “Seçilenleri klasörle”ye bas.' },
+  { icon: '⭐', title: 'Kurallar ve öneriler',
+    text: 'Bir kartın köşesindeki ⭐ ile o grubu kalıcı kural yaparsın; bir dahaki sefere kendiliğinden tikli gelir. “Kopyalar” ve “Eski dosyalar” sekmeleri, aynı içerikteki dosyaları ve uzun süredir dokunulmamış dosyaları önerir.' },
+  { icon: '↶', title: 'Her şey geri alınabilir',
+    text: '“Geçmiş / Geri al” ile istediğin işlemi, hatta tek bir klasörü eski haline döndürebilirsin. Klasörledikten sonra “Masaüstünü sırala” simgeleri düzenli dizer.' },
+];
+
+function openTour() {
+  let i = 0;
+  const overlay = el('div', { class: 'tour' });
+  const card = el('div', { class: 'tour-card' });
+  overlay.append(card);
+  const close = () => { prefs.set('tourDone', true); overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = (e) => {
+    if (e.key === 'Escape') close();
+    else if (e.key === 'ArrowRight' && i < TOUR.length - 1) { i++; draw(); }
+    else if (e.key === 'ArrowLeft' && i > 0) { i--; draw(); }
+  };
+  function draw() {
+    const s = TOUR[i];
+    card.innerHTML = '';
+    card.append(
+      el('div', { class: 'tour-icon', text: s.icon }),
+      el('h2', { text: s.title }),
+      el('p', { text: s.text }),
+      el('div', { class: 'tour-dots' }, TOUR.map((_, k) => el('span', { class: k === i ? 'on' : '', onclick: () => { i = k; draw(); } }))),
+      el('div', { class: 'tour-actions' }, [
+        el('button', { class: 'link', text: 'Geç', onclick: close }),
+        el('div', { class: 'tour-nav' }, [
+          i > 0 ? el('button', { class: 'ghost', text: 'Geri', onclick: () => { i--; draw(); } }) : null,
+          el('button', { class: 'primary', text: i === TOUR.length - 1 ? 'Başlayalım' : 'İleri',
+            onclick: () => { if (i === TOUR.length - 1) close(); else { i++; draw(); } } }),
+        ]),
+      ]),
+    );
+  }
+  draw();
+  document.body.append(overlay);
+  document.addEventListener('keydown', onKey);
+}
+
+// ---------- Ayarlar ----------
+async function openSettings() {
+  let st = {};
+  try { st = await window.api.getSettings(); } catch { /* tarayıcı önizlemesi */ }
+  const row = (key, title, desc, disabled) => {
+    const cb = el('input', { type: 'checkbox', class: 'check', checked: !!st[key], disabled: !!disabled,
+      onchange: async (e) => { st = await window.api.setSettings({ [key]: e.target.checked }); } });
+    return el('label', { class: 'opt-row' + (disabled ? ' disabled' : '') }, [cb, el('span', {}, [el('strong', { text: title }), el('small', { text: desc })])]);
+  };
+  const themeBtns = [['system', '🖥 Sistem'], ['light', '☀ Açık'], ['dark', '🌙 Koyu']].map(([id, label]) =>
+    el('button', { class: 'seg' + ((st.theme || 'system') === id ? ' on' : ''), text: label, onclick: async (e) => {
+      st = await window.api.setSettings({ theme: id });
+      e.target.parentNode.querySelectorAll('.seg').forEach(b => b.classList.toggle('on', b === e.target));
+    } }));
+  const body = el('div', { class: 'settings' }, [
+    el('h3', { text: 'Görünüm' }),
+    el('div', { class: 'segmented' }, themeBtns),
+    el('p', { class: 'muted small', text: 'Sistem seçiliyse Windows açık/karanlık moduna göre otomatik değişir.' }),
+    el('h3', { text: 'Arka plan' }),
+    row('background', 'Arka planda çalış', 'Pencereyi kapatınca uygulama saatin yanındaki simgede çalışmaya devam eder ve masaüstünü izler.'),
+    row('notifyNew', 'Her yeni dosya için bildirim', 'Kapalıyken sadece kurallara göre otomatik taşıma olunca bildirim gelir. Açarsan masaüstüne gelen her yeni dosya için de haber verir.'),
+    row('startWithWindows', 'Windows açılınca başlat', st.canAutostart === false
+      ? 'Sadece kurulu uygulamada çalışır (npm start ile açıldığında kullanılamaz).'
+      : 'Bilgisayar açılınca pencere açmadan arka planda başlar.', st.canAutostart === false),
+    el('h3', { text: 'Yardım' }),
+    el('button', { class: 'ghost', text: '▶ Tanıtımı tekrar göster', onclick: () => { $('#modalCancel').click(); openTour(); } }),
+    el('p', { class: 'muted small', text: 'Masaüstü Düzenleyici · github.com/metehandghn/masaustu-duzenleyici' }),
+  ]);
+  await confirmBox('Ayarlar', body, 'Tamam');
 }
 
 // ---------- Masaüstünü sırala ----------
@@ -516,6 +791,8 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 $('#selAll').addEventListener('click', () => { visibleGroups().forEach(g => state.enabled.add(g.id)); render(); });
 $('#selNone').addEventListener('click', () => { state.enabled.clear(); render(); });
 $('#btnApply').addEventListener('click', applySelected);
+$('#btnHelp').addEventListener('click', openSettings);
+$('#btnRules').addEventListener('click', () => openRules());
 $('#btnArrange').addEventListener('click', openArrange);
 $('#btnUndo').addEventListener('click', openHistory);
 $('#btnScan').addEventListener('click', () => load(state.dir));
@@ -529,4 +806,15 @@ $('#dirLabel').addEventListener('dblclick', () => window.api.openFolder(state.di
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
-window.api.getDesktop().then(d => { state.desktop = d; load(d); });
+if (window.api.onRescan) window.api.onRescan(() => state.dir && load(state.dir, { quiet: true }));
+if (window.api.onDesktopChanged) window.api.onDesktopChanged((n) => {
+  if (!isDesktop()) return;
+  if (!state.enabled.size || [...state.enabled].every(id => id.startsWith('r'))) load(state.dir, { quiet: true });
+  else toast(`Masaüstüne ${n} yeni dosya geldi. Listeye eklemek için “Yeniden tara”ya bas.`);
+});
+
+window.api.getDesktop().then(async d => {
+  state.desktop = d;
+  await load(d);
+  if (!prefs.get('tourDone', false)) openTour();
+});

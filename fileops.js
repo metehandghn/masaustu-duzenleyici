@@ -62,6 +62,48 @@ async function scanFolders(dir) {
   return folders;
 }
 
+// İçeriği birebir aynı dosyaları bulur. Önce boyuta göre ayırır, sadece aynı boyuttakilerin
+// SHA-1 özetini hesaplar (büyük klasörlerde hızlı kalsın diye).
+// Dönüş: [{ keep: 'asıl.pdf', copies: ['asıl (1).pdf', ...] }]
+const crypto = require('crypto');
+const { createReadStream } = require('fs');
+
+function hashFile(p) {
+  return new Promise((resolve, reject) => {
+    const h = crypto.createHash('sha1');
+    createReadStream(p).on('data', d => h.update(d)).on('end', () => resolve(h.digest('hex'))).on('error', reject);
+  });
+}
+
+async function findDuplicates(dir) {
+  const files = await scan(dir);
+  const bySize = new Map();
+  for (const f of files) {
+    if (!f.size) continue; // boş dosyalar hep "aynı" görünür, atla
+    if (!bySize.has(f.size)) bySize.set(f.size, []);
+    bySize.get(f.size).push(f);
+  }
+  const sets = [];
+  for (const list of bySize.values()) {
+    if (list.length < 2) continue;
+    const byHash = new Map();
+    for (const f of list) {
+      try {
+        const h = await hashFile(path.join(dir, f.name));
+        if (!byHash.has(h)) byHash.set(h, []);
+        byHash.get(h).push(f);
+      } catch { /* okunamayan dosyayı atla */ }
+    }
+    for (const same of byHash.values()) {
+      if (same.length < 2) continue;
+      // Asıl: en eski olan; eşitse adı en kısa olan ("rapor.docx", "rapor (1).docx"dan önce)
+      same.sort((a, b) => (a.mtime - b.mtime) || (a.name.length - b.name.length) || a.name.localeCompare(b.name));
+      sets.push({ keep: same[0].name, copies: same.slice(1).map(f => f.name) });
+    }
+  }
+  return sets;
+}
+
 async function readHistory(file) {
   try { return JSON.parse(await fs.readFile(file, 'utf8')); } catch { return []; }
 }
@@ -75,19 +117,64 @@ async function writeHistory(file, history) {
  * groups: [{ folderName, files: ['a.pdf', 'b.pdf'] }]
  * Dosyaları dir/<klasör> içine taşır ve geri alma kaydı tutar.
  */
+// Taşı; farklı sürücüye taşınıyorsa (EXDEV) kopyala + sil
+async function moveFile(from, to) {
+  try {
+    await fs.rename(from, to);
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    // Farklı sürücü: kopyala + sil. Silme başarısız olursa kopyayı geri al ki
+    // dosya iki yerde birden kalmasın.
+    await fs.copyFile(from, to);
+    try {
+      await fs.unlink(from);
+    } catch (err) {
+      await fs.unlink(to).catch(() => {});
+      throw err;
+    }
+  }
+}
+
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Dosya taşınmaya hazır mı? Yeni oluşturulmuş, hâlâ yazılan ya da başka bir
+// programda (Word, OneDrive…) açık olan dosyalar beklenir.
+async function isFileReady(dir, name, minAgeMs = 8000) {
+  const p = path.join(dir, name);
+  try {
+    const a = await fs.stat(p);
+    if (Date.now() - Math.max(a.mtimeMs, a.birthtimeMs || 0) < minAgeMs) return false;
+    await wait(1500);
+    const b = await fs.stat(p);
+    if (a.size !== b.size || a.mtimeMs !== b.mtimeMs) return false; // hâlâ yazılıyor
+    const fh = await fs.open(p, 'r+'); // başka program kilitlediyse hata verir
+    await fh.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Hedef: mutlak yol (kuraldan, ör. D:\Belgeler\Faturalar) ya da taranan klasörün içinde bir ad
+function resolveTarget(dir, g) {
+  const t = String(g.target || '').trim();
+  if (t && path.isAbsolute(t)) return path.normalize(t);
+  return path.join(dir, sanitizeFolderName(t || g.folderName));
+}
+
 async function apply(dir, groups, historyPath) {
   const ops = [];
   const createdDirs = [];
   const errors = [];
 
   for (const g of groups) {
-    const target = path.join(dir, sanitizeFolderName(g.folderName));
+    const target = resolveTarget(dir, g);
     try {
       if (await exists(target)) {
         const st = await fs.stat(target);
         if (!st.isDirectory()) throw new Error('Bu isimde bir dosya zaten var');
       } else {
-        await fs.mkdir(target);
+        await fs.mkdir(target, { recursive: true });
         createdDirs.push(target);
       }
     } catch (e) {
@@ -103,7 +190,7 @@ async function apply(dir, groups, historyPath) {
       const from = path.join(dir, name);
       try {
         const to = await uniquePath(target, name);
-        await fs.rename(from, to);
+        await moveFile(from, to);
         ops.push({ from, to });
       } catch (e) {
         errors.push({ file: name, message: e.code === 'EBUSY' || e.code === 'EPERM' ? 'Dosya kullanımda veya erişim yok' : e.message });
@@ -165,7 +252,7 @@ async function undoSelected(historyPath, picks) {
         const back = (await exists(op.from))
           ? await uniquePath(path.dirname(op.from), path.basename(op.from))
           : op.from;
-        await fs.rename(op.to, back);
+        await moveFile(op.to, back);
         restored++;
       } catch (e) {
         errors.push({ file: path.basename(op.to), message: e.message });
@@ -224,4 +311,4 @@ async function historyCount(historyPath) {
   return (await readHistory(historyPath)).length;
 }
 
-module.exports = { scan, scanFolders, apply, undo, undoSelected, listHistory, historyCount, sanitizeFolderName };
+module.exports = { scan, scanFolders, findDuplicates, isFileReady, apply, undo, undoSelected, listHistory, historyCount, sanitizeFolderName };

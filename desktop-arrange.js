@@ -100,6 +100,7 @@ public static class DesktopArranger {
     uint pid = 10;                                  // Ad
     if (mode == "type") pid = 4;                    // Öğe türü
     else if (mode == "date") pid = 14;              // Değiştirme tarihi
+    else if (mode == "added") pid = 15;             // Oluşturulma tarihi (masaüstüne indirildiği/kopyalandığı an)
     else if (mode == "size") pid = 12;              // Boyut
 
     // Hizalama açık olsun; otomatik düzenleme kullanıcının seçimine göre
@@ -113,17 +114,17 @@ public static class DesktopArranger {
     SORTCOLUMN[] cols = new SORTCOLUMN[1];
     cols[0].propkey.fmtid = fmt;
     cols[0].propkey.pid = pid;
-    cols[0].direction = (mode == "date" || mode == "size") ? -1 : 1; // yeniler / büyükler önce
+    cols[0].direction = (mode == "date" || mode == "added" || mode == "size") ? -1 : 1; // yeniler / büyükler önce
     Check(view.SetSortColumns(cols, 1), "SetSortColumns");
     return "ok";
   }
 }
 `;
 
-const MODES = new Set(['name', 'type', 'date', 'size']);
+const MODES = new Set(['name', 'type', 'date', 'added', 'size']);
 
 /**
- * mode: 'name' | 'type' | 'date' | 'size'
+ * mode: 'name' | 'type' | 'date' | 'added' | 'size'
  * auto: -1 dokunma, 0 kapat, 1 aç (Otomatik düzenle)
  */
 function arrangeDesktop(mode = 'type', auto = -1) {
@@ -165,4 +166,46 @@ function arrangeDesktop(mode = 'type', auto = -1) {
   });
 }
 
-module.exports = { arrangeDesktop, CSHARP };
+// Explorer'a "bu klasörler değişti, yeniden çiz" der (SHChangeNotify).
+// OneDrive'a bağlı masaüstünde taşınan dosyaların simgesi bazen ekranda kalıyor; bu onu giderir.
+const REFRESH_CS = String.raw`
+using System;
+using System.Runtime.InteropServices;
+public static class ShellRefresh {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern void SHChangeNotify(int wEventId, uint uFlags, string dwItem1, IntPtr dwItem2);
+  const int SHCNE_UPDATEDIR = 0x00001000;
+  const int SHCNE_ASSOCCHANGED = 0x08000000;
+  const uint SHCNF_PATHW = 0x0005;
+  const uint SHCNF_FLUSHNOWAIT = 0x3000;
+  public static void Refresh(string[] dirs) {
+    foreach (string d in dirs) SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW | SHCNF_FLUSHNOWAIT, d, IntPtr.Zero);
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_FLUSHNOWAIT, null, IntPtr.Zero);
+  }
+}
+`;
+
+let refreshTimer = null;
+let pendingDirs = new Set();
+
+// Birkaç taşıma art arda gelirse tek seferde yeniler
+function refreshShell(dirs) {
+  if (process.platform !== 'win32') return;
+  (dirs || []).filter(Boolean).forEach(d => pendingDirs.add(d));
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    const list = [...pendingDirs];
+    pendingDirs = new Set();
+    const arr = list.map(d => "'" + d.replace(/'/g, "''") + "'").join(',');
+    const ps = [
+      "Add-Type -Language CSharp -TypeDefinition @'", REFRESH_CS, "'@",
+      `[ShellRefresh]::Refresh([string[]]@(${arr}))`,
+    ].join('\r\n');
+    const child = spawn('powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
+      { windowsHide: true, stdio: 'ignore' });
+    child.on('error', () => {});
+  }, 400);
+}
+
+module.exports = { arrangeDesktop, refreshShell, CSHARP };
