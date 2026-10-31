@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const ops = require('./fileops');
 const Grouping = require('./grouping');
-const { arrangeDesktop, getAutoArrange, refreshShell } = require('./desktop-arrange');
+const { arrangeDesktop, getAutoArrange, refreshShell, notifyShell } = require('./desktop-arrange');
 
 const APP_ID = 'com.metehan.masaustuduzenleyici';
 const startHidden = process.argv.includes('--hidden');
@@ -21,7 +21,7 @@ const settingsPath = () => userFile('settings.json');
 // ---------- Ayarlar ----------
 // notifyNew: kurala uymayan her yeni dosya için bildirim (varsayılan kapalı).
 // Otomatik taşıma bildirimi her zaman gelir.
-const DEFAULT_SETTINGS = { background: true, startWithWindows: false, notifyNew: false, theme: 'system', hideNoticeDone: false };
+const DEFAULT_SETTINGS = { background: true, startWithWindows: false, notifyNew: false, theme: 'system', hideNoticeDone: false, keepSorted: false, sortMode: null };
 const THEMES = new Set(['system', 'light', 'dark']);
 const bgColor = () => (nativeTheme.shouldUseDarkColors ? '#16181d' : '#f4f5f8');
 
@@ -151,6 +151,38 @@ let retryTimer = null;
 let running = false;
 let rerun = false;
 
+// ---------- Masaüstü simgelerini Explorer'la eşitleme ----------
+// Masaüstü klasöründe eklenen/silinen her öğeyi Explorer'a tek tek bildirir (bkz. notifyShell).
+let deskState = null; // ad -> klasör mü
+async function listDesktop() {
+  const ents = await fsp.readdir(app.getPath('desktop'), { withFileTypes: true });
+  return new Map(ents
+    .filter(e => !e.name.startsWith('~$') && e.name.toLowerCase() !== 'desktop.ini')
+    .map(e => [e.name, e.isDirectory()]));
+}
+async function syncDesktopIcons() {
+  let now;
+  try { now = await listDesktop(); } catch { return; }
+  const prev = deskState;
+  deskState = now;
+  if (!prev) return; // ilk okuma: sadece durumu kaydet
+  const dir = app.getPath('desktop');
+  const changes = [];
+  for (const [n, isDir] of now) if (!prev.has(n)) changes.push({ type: isDir ? 'mkdir' : 'create', path: path.join(dir, n) });
+  for (const [n, isDir] of prev) if (!now.has(n)) changes.push({ type: isDir ? 'rmdir' : 'delete', path: path.join(dir, n) });
+  const added = changes.some(c => c.type === 'create' || c.type === 'mkdir');
+  // Windows yeni simgeyi sona ekler, sırayı kendisi yenilemez. Kullanıcı istediyse son sıralamayı tekrarla —
+  // ama ancak Explorer yeni simgeyi listesine aldıktan sonra (bildirim bitince).
+  notifyShell(changes).then(() => { if (added) resortSoon(); });
+}
+
+let resortTimer = null;
+function resortSoon() {
+  if (!settings.keepSorted || !settings.sortMode) return;
+  clearTimeout(resortTimer);
+  resortTimer = setTimeout(() => arrangeDesktop(settings.sortMode, -1), 1000); // Explorer simgeyi eklesin, sonra sırala
+}
+
 async function snapshot() {
   try { known = new Set((await ops.scan(app.getPath('desktop'))).map(f => f.name)); } catch { known = new Set(); }
 }
@@ -168,6 +200,7 @@ async function onDesktopChange() {
 
 async function checkDesktop() {
   const desktop = app.getPath('desktop');
+  await syncDesktopIcons(); // yeni dosyalar masaüstünde hemen görünsün
   let files;
   try { files = await ops.scan(desktop); } catch { return; }
   const fresh = files.filter(f => !known.has(f.name));
@@ -232,6 +265,7 @@ async function checkDesktop() {
 function startWatcher() {
   if (watcher || !settings.background) return;
   snapshot();
+  syncDesktopIcons();
   try {
     watcher = fs.watch(app.getPath('desktop'), () => {
       clearTimeout(debounce);
@@ -255,6 +289,7 @@ const quiet = (fn) => async (...a) => {
   finally {
     quietUntil = Date.now() + 5000;
     snapshot();
+    syncDesktopIcons(); // taşınan/geri gelen dosya ve klasörleri Explorer'a bildir
     const arg = a[1];
     refreshShell([app.getPath('desktop'), arg && arg.dir].filter(Boolean)); // masaüstü simgeleri hemen güncellensin
   }
@@ -287,7 +322,7 @@ ipcMain.handle('set-settings', (_e, patch) => {
   settings = { ...settings, ...patch };
   if ('theme' in patch) applyTheme();
   saveSettings();
-  restartWatcher();
+  if ('background' in patch) restartWatcher();
   return { ...settings, canAutostart: app.isPackaged };
 });
 
@@ -302,6 +337,7 @@ if (!app.requestSingleInstanceLock()) {
     loadSettings();
     createWindow(!(startHidden && settings.background));
     createTray();
+    syncDesktopIcons(); // ilk durumu kaydet (arka plan kapalıyken de taşımalar bildirilsin)
     startWatcher();
     app.on('activate', showWindow);
   });

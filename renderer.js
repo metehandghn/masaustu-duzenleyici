@@ -825,16 +825,22 @@ async function openArrange() {
   try { winAuto = await window.api.getAutoArrange(); } catch { winAuto = undefined; }
   let touched = false;
   const auto = el('input', { type: 'checkbox', class: 'check', checked: winAuto === true, onchange: () => { touched = true; } });
+  let st = {};
+  try { st = await window.api.getSettings(); } catch { /* tarayıcı önizlemesi */ }
+  const keep = el('input', { type: 'checkbox', class: 'check', checked: st.sortMode ? !!st.keepSorted : true }); // ilk seferde açık gelsin
   const body = el('div', { class: 'arrange' }, [
     el('p', { text: 'Masaüstündeki simgeler, Windows\'un “Sıralama ölçütü” özelliğiyle düzenli dizilir. Dosyalara dokunulmaz, sadece yerleri değişir.' }),
     ...radios.map(x => x.row),
     el('label', { class: 'opt-row' }, [auto, el('span', {}, [el('strong', { text: 'Otomatik düzenle' }),
       el('small', { text: 'Windows\'un “Simgeleri otomatik düzenle” ayarı. Açıkken simgeler hep sıralı kalır ve yeni dosyalar her zaman görünür yerde çıkar; elle sürüklenemez.' })])]),
+    el('label', { class: 'opt-row' }, [keep, el('span', {}, [el('strong', { text: 'Yeni dosya gelince yeniden sırala' }),
+      el('small', { text: 'Windows yeni gelen dosyayı sona ekler. Bu açıkken uygulama (arka planda da) aynı sıralamayı tekrarlar; örneğin “Eklenme tarihine göre”de yeni dosya hep sol üstte çıkar.' })])]),
   ]);
   if (!(await confirmBox('Masaüstünü sırala', body, 'Sırala'))) return;
   const mode = (radios.find(x => x.r.checked) || radios[0]).id;
   const autoVal = touched ? (auto.checked ? 1 : 0) : -1; // dokunulmadıysa ayarı değiştirme
   prefs.set('sortMode', mode);
+  try { await window.api.setSettings({ keepSorted: keep.checked, sortMode: mode }); } catch { /* önizleme */ }
   await runArrange(mode, autoVal);
 }
 

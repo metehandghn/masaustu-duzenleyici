@@ -52,6 +52,7 @@ public interface IFolderView2X {
   [PreserveSig] int GetCurrentFolderFlags(out uint pdwFlags);
   [PreserveSig] int GetSortColumnCount(out int pcColumns);
   [PreserveSig] int SetSortColumns([In, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] SORTCOLUMN[] rgSortColumns, int cColumns);
+  [PreserveSig] int GetSortColumns([Out, MarshalAs(UnmanagedType.LPArray, SizeParamIndex = 1)] SORTCOLUMN[] rgSortColumns, int cColumns);
 }
 
 public static class DesktopArranger {
@@ -117,13 +118,45 @@ public static class DesktopArranger {
     step = "SetCurrentFolderFlags";
     Check(view.SetCurrentFolderFlags(mask, flags), "SetCurrentFolderFlags");
 
-    step = "SetSortColumns";
     SORTCOLUMN[] cols = new SORTCOLUMN[1];
     cols[0].propkey.fmtid = fmt;
     cols[0].propkey.pid = pid;
     cols[0].direction = (mode == "date" || mode == "added" || mode == "size") ? -1 : 1; // yeniler / büyükler önce
-    Check(view.SetSortColumns(cols, 1), "SetSortColumns");
-    return "ok";
+
+    // Aynı sıralama tekrar verilirse Explorer yeniden dizmiyor (yeni simge sonda kalıyor).
+    // Önce farklı bir ölçüte geçip Explorer'ın bunu işlemesini bekle, sonra istenene dön.
+    // Explorer arka arkaya gelen ikinci isteği bazen yutuyor; bu yüzden sonucu okuyup gerekirse tekrar dene.
+    step = "SetSortColumns(geçici)";
+    SORTCOLUMN[] tmp = new SORTCOLUMN[1];
+    tmp[0].propkey.fmtid = fmt;
+    tmp[0].propkey.pid = (pid == 10) ? 4u : 10u;
+    tmp[0].direction = 1;
+    view.SetSortColumns(tmp, 1);
+    WaitFor(view, tmp[0]);
+
+    step = "SetSortColumns";
+    for (int k = 0; k < 6; k++) {
+      Check(view.SetSortColumns(cols, 1), "SetSortColumns");
+      if (WaitFor(view, cols[0])) return "ok";
+    }
+    throw new Exception("Explorer sıralamayı uygulamadı");
+  }
+
+  // Görünümün sıralaması istenen hale gelene kadar en fazla ~1 sn bekler
+  static bool WaitFor(IFolderView2X view, SORTCOLUMN want) {
+    for (int i = 0; i < 10; i++) {
+      System.Threading.Thread.Sleep(100);
+      int n;
+      if (view.GetSortColumnCount(out n) < 0 || n < 1) continue;
+      SORTCOLUMN[] cur = new SORTCOLUMN[n];
+      if (view.GetSortColumns(cur, n) < 0) continue;
+      if (cur[0].propkey.pid == want.propkey.pid && cur[0].propkey.fmtid == want.propkey.fmtid
+          && cur[0].direction == want.direction) {
+        System.Threading.Thread.Sleep(150); // dizme bitsin
+        return true;
+      }
+    }
+    return false;
   }
 }
 `;
@@ -223,4 +256,41 @@ function refreshShell(dirs) {
   }, 400);
 }
 
-module.exports = { arrangeDesktop, getAutoArrange, refreshShell, CSHARP };
+// Explorer'a tek tek "şu dosya eklendi / silindi" der.
+// Bazı bilgisayarlarda (özellikle OneDrive'a bağlı masaüstünde) Explorer, başka programların
+// oluşturduğu dosyaların haberini alamıyor: dosya klasörde var ama masaüstünde görünmüyor,
+// F5 de çözmüyor. Gezgin'in kendi kopyalama işleminde yaptığı bildirimi biz yapınca simge hemen çıkar.
+// Aynı şekilde taşınan dosyaların masaüstünde "hayalet" simgesi kalmaz.
+const NOTIFY_CS = String.raw`
+using System;
+using System.Runtime.InteropServices;
+public static class ShellItemNotify {
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+  static extern void SHChangeNotify(int wEventId, uint uFlags, string dwItem1, IntPtr dwItem2);
+  public static void Send(int[] events, string[] paths) {
+    for (int i = 0; i < paths.Length; i++) SHChangeNotify(events[i], 0x0005 | 0x3000, paths[i], IntPtr.Zero);
+  }
+}
+`;
+const EVENTS = { create: 0x2, delete: 0x4, mkdir: 0x8, rmdir: 0x10 };
+
+/** changes: [{ type: 'create'|'delete'|'mkdir'|'rmdir', path }] */
+function notifyShell(changes) {
+  if (process.platform !== 'win32') return Promise.resolve();
+  const list = (changes || []).filter(c => c && c.path && EVENTS[c.type]);
+  if (!list.length) return Promise.resolve();
+  const q = s => "'" + String(s).replace(/'/g, "''") + "'";
+  const ps = [
+    "Add-Type -Language CSharp -TypeDefinition @'", NOTIFY_CS, "'@",
+    `[ShellItemNotify]::Send([int[]]@(${list.map(c => EVENTS[c.type]).join(',')}), [string[]]@(${list.map(c => q(c.path)).join(',')}))`,
+  ].join('\r\n');
+  const child = spawn('powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(ps, 'utf16le').toString('base64')],
+    { windowsHide: true, stdio: 'ignore' });
+  return new Promise((resolve) => {
+    child.on('error', () => resolve());
+    child.on('close', () => resolve()); // bildirim Explorer'a ulaştı
+  });
+}
+
+module.exports = { arrangeDesktop, getAutoArrange, refreshShell, notifyShell, CSHARP };
