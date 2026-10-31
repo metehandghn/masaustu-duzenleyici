@@ -27,6 +27,7 @@ Masaüstündeki dağınıklığı toplamak için Windows uygulaması. Dosyaları
 - **İlk açılış rehberi:** İlk açılışta 5 adımlık kısa bir tanıtım gösterir; ⋯ menüsünden tekrar açılabilir.
 - **Güvenli taşıma:** Hiçbir dosyanın üzerine yazılmaz. Aynı isimde dosya varsa `dosya (2).pdf` olarak kaydedilir. Taşımadan önce özet gösterilir.
 - **Seçmeli geri alma:** Son 50 işlem saklanır. İstediğin işlemi ya da bir işlemin içindeki tek bir klasörü geri alabilirsin. Var olan klasörlere eklenen dosyalar geri alınınca klasör ve içindeki eski dosyalar yerinde kalır.
+- **Otomatik güncelleme:** Uygulama açılışta ve 6 saatte bir GitHub Releases'e bakar; yeni sürümü arka planda indirir ve bildirim gösterir.
 - **OneDrive uyumlu:** Eşitleme sırasında kilitlenen klasörler için silme tekrar denenir.
 - **Simgeler hep güncel:** Bazı bilgisayarlarda Windows Gezgini, başka programların masaüstüne kaydettiği dosyaları göstermiyor (dosya klasörde var, masaüstünde yok; F5 de çözmüyor). Uygulama arka planda masaüstüne eklenen ve masaüstünden taşınan her öğeyi Windows'a tek tek bildirir, böylece yeni dosyalar hemen görünür ve taşınanların simgesi geride kalmaz.
 
@@ -34,7 +35,7 @@ Masaüstündeki dağınıklığı toplamak için Windows uygulaması. Dosyaları
 
 ### Hazır kurulum dosyası
 
-[Releases](../../releases) sayfasından `Masaüstü Düzenleyici Setup x.x.x.exe` dosyasını indirip çalıştır.
+[Releases](../../releases) sayfasından `Masaustu-Duzenleyici-Setup-x.x.x.exe` dosyasını indirip çalıştır. 1.3.4 ve sonrası **kendini otomatik günceller**: yeni sürüm arka planda iner, uygulamadan çıkınca kurulur (tepsi menüsünden hemen de kurulabilir).
 
 Uygulama imzalı olmadığı için Windows SmartScreen uyarı verebilir. **Ek bilgi** → **Yine de çalıştır** ile devam edebilirsin.
 
@@ -62,7 +63,7 @@ npm rebuild electron
 npm run dist
 ```
 
-`dist/` klasöründe `Masaüstü Düzenleyici Setup x.x.x.exe` oluşur. Simge, GitHub'dan ek araç indirmeden `rcedit` ile .exe'ye yazılır.
+`dist/` klasöründe `Masaustu-Duzenleyici-Setup-x.x.x.exe`, `latest.yml` ve `.blockmap` dosyaları oluşur. Otomatik güncellemenin çalışması için GitHub'da `vX.Y.Z` etiketli release'e bu **üç dosyanın üçü de** yüklenmelidir. Simge, GitHub'dan ek araç indirmeden `rcedit` ile .exe'ye yazılır.
 
 ## Nasıl çalışır
 
@@ -94,7 +95,7 @@ Aynı dosya birden fazla grupta görünebilir. Birden çok grup seçilirse dosya
 
 - [Electron](https://www.electronjs.org/) ve Node.js `fs/promises`
 - Saf HTML, CSS ve JavaScript (çerçeve kullanılmadı)
-- [electron-builder](https://www.electron.build/) (NSIS kurulum dosyası) ve [rcedit](https://github.com/electron/rcedit)
+- [electron-builder](https://www.electron.build/) (NSIS kurulum dosyası), [electron-updater](https://www.electron.build/auto-update) (otomatik güncelleme) ve [rcedit](https://github.com/electron/rcedit)
 
 ## Bilinen sınırlar
 

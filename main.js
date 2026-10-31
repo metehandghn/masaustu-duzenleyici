@@ -111,6 +111,38 @@ function notify(title, body, onClick) {
   n.show();
 }
 
+// ---------- Otomatik güncelleme ----------
+// GitHub Releases'teki en son sürümü (latest.yml) kontrol eder, varsa arka planda indirir.
+// İndirilen güncelleme uygulama kapanınca (Çıkış / Windows kapanışı) sessizce kurulur;
+// istenirse bildirimden ya da tepsi menüsünden hemen kurulabilir.
+let updater = null;
+let updateReady = null; // indirilmiş sürüm numarası
+
+function setupUpdates() {
+  if (!app.isPackaged) return; // geliştirirken (npm start) güncelleme arama
+  try { updater = require('electron-updater').autoUpdater; } catch { return; }
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  updater.on('error', () => { /* internet yok vb. — sessizce geç, sonra tekrar denenir */ });
+  updater.on('update-downloaded', (info) => {
+    if (updateReady === info.version) return;
+    updateReady = info.version;
+    buildTrayMenu();
+    notify(`Masaüstü Düzenleyici ${info.version} hazır`,
+      'Uygulamadan çıkınca kendiliğinden güncellenecek. Hemen güncellemek için tıkla.', installUpdate);
+  });
+  const check = () => updater.checkForUpdates().catch(() => {});
+  setTimeout(check, 15000);                 // açılıştan biraz sonra
+  setInterval(check, 6 * 60 * 60 * 1000);   // arka planda 6 saatte bir
+}
+
+function installUpdate() {
+  if (!updater || !updateReady) return;
+  quitting = true;     // pencere tepsiye gizlenmesin, gerçekten kapansın
+  stopWatcher();
+  setImmediate(() => updater.quitAndInstall(true, true)); // sessiz kur, sonra uygulamayı aç
+}
+
 // ---------- Sistem tepsisi ----------
 function buildTrayMenu() {
   if (!tray) return;
@@ -125,6 +157,8 @@ function buildTrayMenu() {
     { label: 'Windows açılınca başlat', type: 'checkbox', checked: settings.startWithWindows, enabled: app.isPackaged,
       click: (i) => { settings.startWithWindows = i.checked; saveSettings(); } },
     { type: 'separator' },
+    ...(updateReady ? [{ label: `Güncellemeyi yükle (${updateReady})`, click: installUpdate }, { type: 'separator' }] : []),
+    { label: `Sürüm ${app.getVersion()}`, enabled: false },
     { label: 'Çıkış', click: () => { quitting = true; app.quit(); } },
   ]));
 }
@@ -170,10 +204,20 @@ async function syncDesktopIcons() {
   const changes = [];
   for (const [n, isDir] of now) if (!prev.has(n)) changes.push({ type: isDir ? 'mkdir' : 'create', path: path.join(dir, n) });
   for (const [n, isDir] of prev) if (!now.has(n)) changes.push({ type: isDir ? 'rmdir' : 'delete', path: path.join(dir, n) });
-  const added = changes.some(c => c.type === 'create' || c.type === 'mkdir');
   // Windows yeni simgeyi sona ekler, sırayı kendisi yenilemez. Kullanıcı istediyse son sıralamayı tekrarla —
   // ama ancak Explorer yeni simgeyi listesine aldıktan sonra (bildirim bitince).
-  notifyShell(changes).then(() => { if (added) resortSoon(); });
+  // Otomatik kurala uyan dosyalar zaten klasöre taşınacağı için onlar yüzünden masaüstü kıpırdamasın.
+  const addedDirs = changes.filter(c => c.type === 'mkdir');
+  let addedFiles = changes.filter(c => c.type === 'create').map(c => ({ name: path.basename(c.path) }));
+  notifyShell(changes).then(async () => {
+    if (!addedDirs.length && addedFiles.length) {
+      try {
+        const rules = await readRules();
+        if (rules.autoApply) addedFiles = addedFiles.filter(f => !Grouping.matchRules([f], rules).length);
+      } catch { /* kurallar okunamadıysa normal davran */ }
+    }
+    if (addedDirs.length || addedFiles.length) resortSoon();
+  });
 }
 
 let resortTimer = null;
@@ -339,6 +383,7 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     syncDesktopIcons(); // ilk durumu kaydet (arka plan kapalıyken de taşımalar bildirilsin)
     startWatcher();
+    setupUpdates();
     app.on('activate', showWindow);
   });
 
