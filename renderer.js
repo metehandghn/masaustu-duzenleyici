@@ -793,7 +793,7 @@ async function openSettings() {
       : 'Bilgisayar açılınca pencere açmadan arka planda başlar.', st.canAutostart === false),
     el('h3', { text: 'Yardım' }),
     el('button', { class: 'ghost', text: '▶ Tanıtımı tekrar göster', onclick: () => { $('#modalCancel').click(); openTour(); } }),
-    el('p', { class: 'muted small', text: 'Masaüstü Düzenleyici · github.com/metehandghn/masaustu-duzenleyici' }),
+    el('p', { class: 'muted small', text: `Masaüstü Düzenleyici${st.version ? ' ' + st.version : ''} · Yeni sürümler otomatik yüklenir · github.com/metehandghn/masaustu-duzenleyici` }),
   ]);
   await confirmBox('Ayarlar', body, 'Tamam');
 }

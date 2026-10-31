@@ -1,6 +1,6 @@
 {
   "name": "masaustu-duzenleyici",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "description": "Masaüstündeki dosyaları türe ve benzer isme göre gruplayıp seçtiğin klasörlere yerleştiren uygulama",
   "main": "main.js",
   "author": "Metehan Dağhan",

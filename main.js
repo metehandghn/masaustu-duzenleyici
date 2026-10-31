@@ -361,7 +361,7 @@ ipcMain.handle('save-rules', async (_e, rules) => {
 });
 ipcMain.handle('arrange-desktop', (_e, { mode, auto }) => arrangeDesktop(mode, auto));
 ipcMain.handle('get-auto-arrange', () => getAutoArrange());
-ipcMain.handle('get-settings', () => ({ ...settings, canAutostart: app.isPackaged }));
+ipcMain.handle('get-settings', () => ({ ...settings, canAutostart: app.isPackaged, version: app.getVersion() }));
 ipcMain.handle('set-settings', (_e, patch) => {
   settings = { ...settings, ...patch };
   if ('theme' in patch) applyTheme();
