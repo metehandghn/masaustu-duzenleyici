@@ -21,7 +21,7 @@ const settingsPath = () => userFile('settings.json');
 // ---------- Ayarlar ----------
 // notifyNew: kurala uymayan her yeni dosya için bildirim (varsayılan kapalı).
 // Otomatik taşıma bildirimi her zaman gelir.
-const DEFAULT_SETTINGS = { background: true, startWithWindows: false, notifyNew: false, theme: 'system', hideNoticeDone: false, keepSorted: false, sortMode: null };
+const DEFAULT_SETTINGS = { background: true, startWithWindows: false, notifyNew: false, theme: 'system', hideNoticeDone: false, keepSorted: false, sortMode: null, askedAutostart: false };
 const THEMES = new Set(['system', 'light', 'dark']);
 const bgColor = () => (nativeTheme.shouldUseDarkColors ? '#16181d' : '#f4f5f8');
 
@@ -111,6 +111,20 @@ function notify(title, body, onClick) {
   n.show();
 }
 
+// Uygulama çalışmıyorken yeni dosyalar bildirilemez ve sıralanamaz. Bilgisayar yeniden başlayınca
+// uygulama kendiliğinden açılmıyorsa kullanıcı bunu fark etmeyebilir; bir kez sor.
+async function askAutostartOnce() {
+  if (!app.isPackaged || settings.startWithWindows || settings.askedAutostart) return;
+  settings.askedAutostart = true; saveSettings();
+  const r = await dialog.showMessageBox({
+    type: 'question', buttons: ['Evet, başlasın', 'Hayır'], defaultId: 0, cancelId: 1, noLink: true,
+    title: 'Masaüstü Düzenleyici',
+    message: 'Windows açılınca arka planda başlasın mı?',
+    detail: 'Yeni dosyaların masaüstünde görünmesi, sıralanması ve kurallara göre taşınması için uygulamanın çalışıyor olması gerekir. Açık olmadığında bunlar yapılamaz.\n\nBu ayarı tepsi menüsünden istediğin zaman değiştirebilirsin.',
+  });
+  if (r.response === 0) { settings.startWithWindows = true; saveSettings(); buildTrayMenu(); }
+}
+
 // ---------- Otomatik güncelleme ----------
 // GitHub Releases'teki en son sürümü (latest.yml) kontrol eder, varsa arka planda indirir.
 // İndirilen güncelleme uygulama kapanınca (Çıkış / Windows kapanışı) sessizce kurulur;
@@ -188,18 +202,46 @@ let rerun = false;
 // ---------- Masaüstü simgelerini Explorer'la eşitleme ----------
 // Masaüstü klasöründe eklenen/silinen her öğeyi Explorer'a tek tek bildirir (bkz. notifyShell).
 let deskState = null; // ad -> klasör mü
+// Son görülen durum diske de yazılır: uygulama kapalıyken gelen dosyalar bir sonraki açılışta fark edilip
+// Explorer'a bildirilir (yoksa klasörde olup masaüstünde görünmeyen dosyalar öylece kalırdı).
+const deskStateFile = () => path.join(app.getPath('userData'), 'desk-state.json');
+async function loadDeskState() {
+  try { return new Map(JSON.parse(await fsp.readFile(deskStateFile(), 'utf8'))); } catch { return null; }
+}
+function saveDeskState() {
+  if (deskState) fsp.writeFile(deskStateFile(), JSON.stringify([...deskState])).catch(() => {});
+}
+// Kayıtlı durum yoksa (ilk kurulum / güncelleme sonrası): son günlerde gelen öğeleri "yeni" say
+async function recentBaseline(now) {
+  const dir = app.getPath('desktop'), limit = Date.now() - 7 * 24 * 3600 * 1000;
+  const base = new Map(now);
+  await Promise.all([...now.keys()].map(async (n) => {
+    try {
+      const st = await fsp.stat(path.join(dir, n));
+      if (Math.max(st.birthtimeMs, st.mtimeMs) > limit) base.delete(n);
+    } catch { /* yok say */ }
+  }));
+  return base;
+}
 async function listDesktop() {
   const ents = await fsp.readdir(app.getPath('desktop'), { withFileTypes: true });
   return new Map(ents
     .filter(e => !e.name.startsWith('~$') && e.name.toLowerCase() !== 'desktop.ini')
     .map(e => [e.name, e.isDirectory()]));
 }
-async function syncDesktopIcons() {
+// Çağrılar sıraya girer: aynı anda iki eşitleme durum dosyasını yarım okumasın / aynı farkı iki kez bildirmesin
+let syncChain = Promise.resolve();
+function syncDesktopIcons() {
+  syncChain = syncChain.then(doSyncDesktopIcons).catch(() => {});
+  return syncChain;
+}
+async function doSyncDesktopIcons() {
   let now;
   try { now = await listDesktop(); } catch { return; }
-  const prev = deskState;
-  deskState = now;
-  if (!prev) return; // ilk okuma: sadece durumu kaydet
+  let prev = deskState;
+  deskState = now; // eşzamanlı ikinci çağrı aynı farkı tekrar bildirmesin
+  if (!prev) prev = (await loadDeskState()) || (await recentBaseline(now)); // açılış: kapalıyken gelenleri bul
+  saveDeskState();
   const dir = app.getPath('desktop');
   const changes = [];
   for (const [n, isDir] of now) if (!prev.has(n)) changes.push({ type: isDir ? 'mkdir' : 'create', path: path.join(dir, n) });
@@ -315,13 +357,27 @@ function startWatcher() {
       clearTimeout(debounce);
       debounce = setTimeout(onDesktopChange, 3000); // dosya kopyalanırken birkaç olay gelir, bekle
     });
-    watcher.on('error', () => { watcher = null; });
+    // OneDrive klasörlerinde izleyici bazen kopuyor: kapat, biraz sonra yeniden kur
+    watcher.on('error', () => { try { watcher.close(); } catch { /* zaten kapalı */ } watcher = null; setTimeout(startWatcher, 5000); });
   } catch { watcher = null; }
+  // Emniyet ağı: izleyici olay kaçırırsa diye masaüstünü düzenli aralıklarla da yokla (ucuz: tek klasör listesi)
+  if (!pollTimer) pollTimer = setInterval(pollDesktop, 20000);
+}
+
+let pollTimer = null;
+async function pollDesktop() {
+  if (!deskState || running) return;
+  let now;
+  try { now = await listDesktop(); } catch { return; }
+  let same = now.size === deskState.size;
+  if (same) for (const n of now.keys()) if (!deskState.has(n)) { same = false; break; }
+  if (!same) { clearTimeout(debounce); debounce = setTimeout(onDesktopChange, 1500); }
 }
 
 function stopWatcher() {
   if (watcher) { watcher.close(); watcher = null; }
   clearTimeout(debounce);
+  clearInterval(pollTimer); pollTimer = null;
 }
 
 function restartWatcher() { stopWatcher(); startWatcher(); }
@@ -384,6 +440,7 @@ if (!app.requestSingleInstanceLock()) {
     syncDesktopIcons(); // ilk durumu kaydet (arka plan kapalıyken de taşımalar bildirilsin)
     startWatcher();
     setupUpdates();
+    askAutostartOnce();
     app.on('activate', showWindow);
   });
 

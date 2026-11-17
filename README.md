@@ -29,7 +29,7 @@ Masaüstündeki dağınıklığı toplamak için Windows uygulaması. Dosyaları
 - **Seçmeli geri alma:** Son 50 işlem saklanır. İstediğin işlemi ya da bir işlemin içindeki tek bir klasörü geri alabilirsin. Var olan klasörlere eklenen dosyalar geri alınınca klasör ve içindeki eski dosyalar yerinde kalır.
 - **Otomatik güncelleme:** Uygulama açılışta ve 6 saatte bir GitHub Releases'e bakar; yeni sürümü arka planda indirir ve bildirim gösterir.
 - **OneDrive uyumlu:** Eşitleme sırasında kilitlenen klasörler için silme tekrar denenir.
-- **Simgeler hep güncel:** Bazı bilgisayarlarda Windows Gezgini, başka programların masaüstüne kaydettiği dosyaları göstermiyor (dosya klasörde var, masaüstünde yok; F5 de çözmüyor). Uygulama arka planda masaüstüne eklenen ve masaüstünden taşınan her öğeyi Windows'a tek tek bildirir, böylece yeni dosyalar hemen görünür ve taşınanların simgesi geride kalmaz.
+- **Simgeler hep güncel:** Bazı bilgisayarlarda Windows Gezgini, başka programların masaüstüne kaydettiği dosyaları göstermiyor (dosya klasörde var, masaüstünde yok; F5 de çözmüyor). Uygulama arka planda masaüstüne eklenen ve masaüstünden taşınan her öğeyi Windows'a tek tek bildirir, böylece yeni dosyalar hemen görünür ve taşınanların simgesi geride kalmaz. Uygulama kapalıyken gelen dosyalar da bir sonraki açılışta fark edilip bildirilir. Bunların çalışması için uygulamanın açık olması gerekir; ilk açılışta Windows ile birlikte başlamak isteyip istemediğini sorar.
 
 ## Kurulum
 

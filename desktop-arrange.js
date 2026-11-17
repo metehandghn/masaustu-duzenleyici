@@ -275,10 +275,14 @@ public static class ShellItemNotify {
 const EVENTS = { create: 0x2, delete: 0x4, mkdir: 0x8, rmdir: 0x10 };
 
 /** changes: [{ type: 'create'|'delete'|'mkdir'|'rmdir', path }] */
-function notifyShell(changes) {
-  if (process.platform !== 'win32') return Promise.resolve();
-  const list = (changes || []).filter(c => c && c.path && EVENTS[c.type]);
-  if (!list.length) return Promise.resolve();
+async function notifyShell(changes) {
+  if (process.platform !== 'win32') return;
+  const all = (changes || []).filter(c => c && c.path && EVENTS[c.type]);
+  // Komut satırı uzunluk sınırını aşmamak için parça parça gönder
+  for (let i = 0; i < all.length; i += 25) await notifyChunk(all.slice(i, i + 25));
+}
+
+function notifyChunk(list) {
   const q = s => "'" + String(s).replace(/'/g, "''") + "'";
   const ps = [
     "Add-Type -Language CSharp -TypeDefinition @'", NOTIFY_CS, "'@",
